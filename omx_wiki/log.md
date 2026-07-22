@@ -85,7 +85,6 @@
 ## [2026-06-27T08:45:44.402Z] add
 - **Pages:** dota-browser-plugin-dsm-package-provenance.md, dota-browser-plugin-network-state-investigation.md, gghjt-modal-timer-and-cold-extraction-regressions.md, gms-payment-latency-analysis.md, opglqa-font-download-repeat-investigation.md, rx4-5-arm-ext-0x80000000-platform-io-mapping.md
 - **Summary:** Refreshed wiki index and derived metadata surfaces
-
 ## [2026-06-27T09:09:19.252Z] query
 - **Pages:** dota-browser-plugin-network-state-investigation.md, dota-browser-plugin-dsm-package-provenance.md, opglqa-font-download-repeat-investigation.md, gghjt-modal-timer-and-cold-extraction-regressions.md, gms-payment-latency-analysis.md, rx4-5-arm-ext-0x80000000-platform-io-mapping.md
 - **Summary:** Query "dota simpleDownload browser plugin network state investigation" → 6 results (of 6 total)
