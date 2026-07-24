@@ -1,6 +1,6 @@
 # Wiki Index
 
-> 42 pages | Last updated: 2026-07-22T07:03:00.000Z
+> 43 pages | Last updated: 2026-07-25T07:41:03.450Z
 
 ## debugging
 
@@ -15,6 +15,7 @@
 - [DOTA download-browser-components waiting hypothesis invalidated](dota-download-browser-components-waiting-hypothesis-invalidated.md) — # DOTA download-browser-components waiting hypothesis invalidated
 - [gfhcq game stutter performance investigation](gfhcq-game-stutter-performance-investigation.md) — # gfhcq game stutter performance investigation
 - [gghjt modal timer and cold extraction regressions](gghjt-modal-timer-and-cold-extraction-regressions.md) — # gghjt modal timer and cold extraction regressions
+- [gjxwsmn netpay plugin update progress](gjxwsmn-netpay-plugin-update-progress.md) — # gjxwsmn netpay plugin update progress
 - [gms payment latency analysis](gms-payment-latency-analysis.md) — # gms payment latency analysis
 - [GSHA old compact-timer download callback fix](gsha-old-compact-timer-download-callback-fix.md) — # GSHA old compact-timer download callback fix
 - [GTXZJ date guard and default runtime assets](gtxzj-date-guard-and-default-runtime-assets.md) — # GTXZJ date guard and default runtime assets
