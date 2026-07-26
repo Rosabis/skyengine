@@ -608,10 +608,7 @@ tool/server-http.js已启动，修改tool/proxy.js来实现代理服务器。
 充分利用子Agent。
 记得存储记忆数据。
 
-测试用例`pnpm vitest run test/e2e/gsha/download-res.test.ts`执行后，会下载资源包，但是没有进度，分析并修复。
-
-预期结果：资源包开始下载。
-实际结果：看起来没有发起网络请求。
+测试用例`build/skyengine build/mythroad/gtlbd.mrp`执行后，会显示“按任意键键入”，但是过几秒钟，没有任何动作的情况下，该文字会消失，且后续交互文字都会出现丢失。
 
 程序的现有代码不一定正确。
 注意trace日志量会特别大。
