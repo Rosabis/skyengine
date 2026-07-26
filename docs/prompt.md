@@ -605,8 +605,8 @@ tool/server-http.js已启动，修改tool/proxy.js来实现代理服务器。
 充分利用子Agent。
 记得存储记忆数据。
 
+命令`build/skyengine build/mythroad/311019_1015_gsht.mrp`执行后黑屏，分析BUG并修复此问题。
 
-分析代码，想办法把`src/app_compat_gghjt.c`和`src/app_compat.c`的硬编码逻辑去掉，改成通用逻辑。
 程序的现有代码不一定正确。
 注意trace日志量会特别大。
 不要使用xvfb。
@@ -614,6 +614,7 @@ tool/server-http.js已启动，修改tool/proxy.js来实现代理服务器。
 深入反汇编检测BUG所在位置。
 你可以检测PPM，来验证修复是否成功。
 不能写硬编码代码，如if(is_xxx_app()) {...}
+禁止硬编码
 
 在分析与解决过程中，把进度定期保存至文档中。
 先不管其它测试用例，先修好BUG，最后一定要去兼容其它测试用例。
