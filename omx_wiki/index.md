@@ -1,6 +1,6 @@
 # Wiki Index
 
-> 43 pages | Last updated: 2026-07-25T07:41:03.450Z
+> 44 pages | Last updated: 2026-07-25T11:15:01.000Z
 
 ## debugging
 
@@ -18,6 +18,7 @@
 - [gjxwsmn netpay plugin update progress](gjxwsmn-netpay-plugin-update-progress.md) — # gjxwsmn netpay plugin update progress
 - [gms payment latency analysis](gms-payment-latency-analysis.md) — # gms payment latency analysis
 - [GSHA old compact-timer download callback fix](gsha-old-compact-timer-download-callback-fix.md) — # GSHA old compact-timer download callback fix
+- [GSHT black screen nested resource owner progress](gsht-black-screen-nested-resource-owner-progress.md) — # GSHT black screen nested resource owner progress
 - [GTXZJ date guard and default runtime assets](gtxzj-date-guard-and-default-runtime-assets.md) — # GTXZJ date guard and default runtime assets
 - [gwyaz installed-file probe and wrapper RW owner fix](gwyaz-installed-file-probe-and-wrapper-rw-owner-fix.md) — # gwyaz installed-file probe and wrapper RW owner fix
 - [gzwdzjs ARM EXT DrawBitmap source overrun](gzwdzjs-arm-ext-drawbitmap-source-overrun.md) — # gzwdzjs ARM EXT DrawBitmap source overrun
