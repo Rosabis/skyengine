@@ -25,11 +25,11 @@ describe("gsha", () => {
       captureLatestFrame: true,
     });
 
-    await vi.waitFor(async () => {
-      const screen = await engine!.screen("bgm-select");
-      // rgb(248, 252, 248)
-      expect(screen.pixel(137, 162)).toEqual([248, 252, 248]);
-    }, { timeout: 10_000, interval: 1_000 });
+    await engine.waitForColorInRect(
+      [248, 252, 248],
+      { x: 0, y: 294, width: 240, height: 26 },
+      { name: "bgm-select", timeoutMs: 10_000, intervalMs: 1_000, minCount: 5 },
+    );
 
     // Keep music disabled so audio timing cannot change the network transition.
     await engine.key("RIGHT_SOFT", 1_000);
@@ -48,8 +48,10 @@ describe("gsha", () => {
       const screen = await engine!.screen("game-save");
       // rgb(0, 0, 0)
       expect(screen.pixel(120, 47)).toEqual([0, 0, 0]);
-      // rgb(160, 180, 0)
-      expect(screen.pixel(116, 13)).toEqual([160, 180, 0]);
+      expect(screen.colorPixelCount(
+        [160, 180, 0],
+        { x: 60, y: 0, width: 120, height: 30 },
+      )).toBeGreaterThan(5);
     }, { timeout: 10_000, interval: 1_000 });
     
     // 读取存档

@@ -27,12 +27,11 @@ describe("gwkdl 进入准备界面", () => {
     fs.rmSync(ws.path('mythroad/cache/exdet.dat'), { force: true })
     engine = await SkyEngineE2e.start("test/fixtures/gwkdl_v1003.mrp", { workDir: ws.dir });
 
-    await engine.delay(1000);
-    {
-      const boot = await engine.screen("mem-check");
-      // rgb(248, 252, 248)
-      expect(boot.pixel(60, 82)).toEqual([248, 252, 248]);
-    }
+    await engine.waitForColorInRect(
+      [248, 252, 248],
+      { x: 20, y: 60, width: 200, height: 50 },
+      { name: "mem-check", timeoutMs: 10_000, intervalMs: 500, minCount: 10 },
+    );
     // 是否检测内存？-> 是
     await engine.key('LEFT_SOFT', 1_000);
     await engine.delay(15_000);

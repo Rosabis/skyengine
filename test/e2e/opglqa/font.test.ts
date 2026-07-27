@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { SkyEngineE2e, SkyEngineWorkspace } from "../engine-e2e.js";
 import fs from "fs";
 
@@ -56,14 +56,15 @@ describe("opglqa 进入主菜单", () => {
     {
       // 开始下载字体资源，下载完成后显示下载完成结果。
       await engine.key('LEFT_SOFT', 1_000)
-      await vi.waitFor(async () => {
-        if (!engine) throw new Error("engine is undefined");
-        const screen = await engine.screen("confirm-result");
-        // rgb(0, 0, 0)
-        expect(screen.pixel(155, 153)).toEqual([0, 0, 0]);
-        // rgb(248, 252, 248)
-        expect(screen.pixel(30, 301)).toEqual([248, 252, 248]);
-      }, { timeout: 20_000, interval: 1_000 });
+      const screen = await engine.waitForColorInRect(
+        [248, 252, 248],
+        { x: 0, y: 294, width: 120, height: 26 },
+        { name: "confirm-result", timeoutMs: 20_000, intervalMs: 1_000, minCount: 5 },
+      );
+      expect(screen.colorPixelCount(
+        [0, 0, 0],
+        { x: 40, y: 135, width: 160, height: 40 },
+      )).toBeGreaterThan(5);
     }
     {
       // 确认下载结果，进入主界面。

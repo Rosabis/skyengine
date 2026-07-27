@@ -17,6 +17,9 @@ describe("gtdgdq", () => {
     // 每个用例使用独立的 mythroad 数据副本,避免并发执行时互相覆盖插件/缓存/存档。
     ws = await SkyEngineWorkspace.create();
     fs.rmSync(ws.path('mythroad/gtdgdq'), { recursive: true, force: true })
+    // 主文本和平台文本页都必须来自宿主系统字体，不能读取旧的工作目录点阵。
+    fs.rmSync(ws.path('mythroad/system/gb12.uc2'), { force: true });
+    fs.rmSync(ws.path('mythroad/system/gb16.uc2'), { force: true });
     
     // gtdgdq 使用默认 240x320 画布；断言坐标对应应用的原生竖屏布局。
     engine = await SkyEngineE2e.start("test/fixtures/gtdgdq.mrp", { workDir: ws.dir });
@@ -49,10 +52,11 @@ describe("gtdgdq", () => {
         const screen = await engine.screen("help");
         expect(screen.diffPixelCount(menu)).toBeGreaterThan(0);
         expect(screen.uniqueColorCount()).toBe(2);
-        expect(screen.pixel(9, 8)).toEqual([0, 252, 0]);
-        expect(screen.pixel(9, 34)).toEqual([0, 252, 0]);
+        // 不绑定某个平台字体的具体笔画坐标，只要求各语义区域确实有文字。
+        expect(screen.colorPixelCount([0, 252, 0], { x: 8, y: 8, width: 224, height: 16 })).toBeGreaterThan(0);
+        expect(screen.colorPixelCount([0, 252, 0], { x: 8, y: 32, width: 224, height: 240 })).toBeGreaterThan(0);
         expect(screen.pixel(0, 294)).toEqual([0, 252, 0]);
-        expect(screen.pixel(212, 300)).toEqual([0, 252, 0]);
+        expect(screen.colorPixelCount([0, 252, 0], { x: 120, y: 295, width: 116, height: 25 })).toBeGreaterThan(0);
         expect(screen.pixel(120, 160)).toEqual([0, 0, 0]);
       })
 

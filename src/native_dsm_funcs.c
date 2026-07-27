@@ -34,6 +34,7 @@
 #include "./include/file_lib.h"
 #include "./include/native_text_widget.h"
 #include "./include/network.h"
+#include "./include/platform_font.h"
 #include "./include/utils.h"
 #include "./include/skyengine.h"
 
@@ -1459,6 +1460,17 @@ static const char *native_editGetText(int32 edit) {
     return editGetText(edit);
 }
 
+static const uint8 *native_font_get_glyph(uint16 ch, uint16 pixel_height,
+                                          int32 *width, int32 *height) {
+    int glyph_width = 0;
+    int glyph_height = 0;
+    const uint8_t *bitmap = platform_font_glyph(
+        ch, pixel_height, &glyph_width, &glyph_height);
+    if (width) *width = glyph_width;
+    if (height) *height = glyph_height;
+    return (const uint8 *)bitmap;
+}
+
 #if defined(__EMSCRIPTEN__)
 #define NATIVE_DSM_FLAGS FLAG_USE_UTF8_FS
 #elif defined(_WIN32)
@@ -1522,6 +1534,7 @@ static DSM_REQUIRE_FUNCS native_funcs = {
     .mr_editGetText = native_editGetText,
     .mr_playSoundChannel = native_playSoundChannel,
     .mr_stopSoundChannel = native_stopSoundChannel,
+    .font_get_glyph = native_font_get_glyph,
     .flags = NATIVE_DSM_FLAGS,
     .screen_width = 0,
     .screen_height = 0,

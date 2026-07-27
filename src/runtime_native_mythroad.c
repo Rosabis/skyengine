@@ -5,6 +5,7 @@
 
 #include "./include/native_dsm_funcs.h"
 #include "./include/native_text_widget.h"
+#include "./include/platform_font.h"
 #include "./include/dsm.h"
 
 extern int32 mr_start_dsm(char *filename, char *ext, char *entry);
@@ -14,9 +15,14 @@ extern int32 mr_motion_input(int32 x, int32 y, int32 z);
 
 int skyengine_runtime_init(VmrpRuntime *rt) {
     memset(rt, 0, sizeof(*rt));
+    if (!platform_font_init()) {
+        fprintf(stderr, "skyengine: platform system font is unavailable\n");
+        return MR_FAILED;
+    }
     int32 ret = dsm_init(native_dsm_funcs_get());
     if (ret != VMRP_VER) {
         printf("err: native dsm_version got %d expect %d\n", ret, VMRP_VER);
+        platform_font_shutdown();
         return MR_FAILED;
     }
     printf("native dsm_init success\n");
@@ -59,5 +65,6 @@ int skyengine_runtime_motion(VmrpRuntime *rt, int32_t x, int32_t y, int32_t z) {
 
 void skyengine_runtime_destroy(VmrpRuntime *rt) {
     native_dsm_funcs_destroy();
+    platform_font_shutdown();
     memset(rt, 0, sizeof(*rt));
 }

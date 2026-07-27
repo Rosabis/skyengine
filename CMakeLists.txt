@@ -232,6 +232,7 @@ set(SKYENGINE_CORE_SOURCES
   ./src/rbtree.c
   ./src/network.c
   ./src/file_lib.c
+  ./src/platform_font.c
 )
 
 set(SKYENGINE_PLATFORM_SDL_SOURCES
@@ -342,7 +343,8 @@ target_include_directories(skyengine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_p
 if(MSVC)
   skyengine_add_link_flags(skyengine "/FORCE:MULTIPLE")
   target_include_directories(skyengine PRIVATE ${SDL2_INCLUDE_DIRS})
-  target_link_libraries(skyengine unicorn ZLIB::ZLIB SDL2::SDL2main SDL2::SDL2 ws2_32)
+  target_link_libraries(skyengine unicorn ZLIB::ZLIB SDL2::SDL2main SDL2::SDL2
+                        ws2_32 gdi32 user32)
   # Copy SDL2.dll next to the executable after build
   if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(_SDL2_DLL "${sdl2_vc_SOURCE_DIR}/lib/x64/SDL2.dll")
@@ -356,74 +358,9 @@ else()
   skyengine_add_link_flags(skyengine "-Wl,--allow-multiple-definition")
   # --no-as-needed 确保 libm 不被 GNU ld 按需跳过——unicorn 的内部静态库
   # （arm-softmmu）在链接顺序上排在 -lm 之后，需要其中的 sqrtf 等符号
-  target_link_libraries(skyengine unicorn "-Wl,--no-as-needed" SDL2main SDL2 m pthread z)
+  target_link_libraries(skyengine unicorn "-Wl,--no-as-needed" SDL2main SDL2
+                        m pthread z ${CMAKE_DL_LIBS})
 endif()
-
-# The executable directory is the desktop default work-dir.  Deploy the base
-# fonts there so a freshly built CLI can render text without a source-tree cwd.
-set(_SKYENGINE_SYSTEM_ASSET_DIR
-  "${CMAKE_CURRENT_SOURCE_DIR}/wasm/dist/fs/mythroad/system")
-# Avoid TARGET_FILE_DIR here: that generator expression adds an implicit edge
-# back to SkyEngine and would cycle with the explicit asset dependency below. Read
-# the initialized output properties instead, including caller overrides.
-get_property(_SKYENGINE_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-get_target_property(_SKYENGINE_RUNTIME_BASE skyengine RUNTIME_OUTPUT_DIRECTORY)
-if(NOT _SKYENGINE_RUNTIME_BASE OR _SKYENGINE_RUNTIME_BASE MATCHES "-NOTFOUND$")
-  set(_SKYENGINE_RUNTIME_BASE "${CMAKE_CURRENT_BINARY_DIR}")
-endif()
-if(_SKYENGINE_MULTI_CONFIG)
-  set(_SKYENGINE_NATIVE_RUNTIME_DIR "")
-  foreach(_SKYENGINE_CONFIG IN LISTS CMAKE_CONFIGURATION_TYPES)
-    string(TOUPPER "${_SKYENGINE_CONFIG}" _SKYENGINE_CONFIG_UPPER)
-    get_target_property(_SKYENGINE_CONFIG_RUNTIME_DIR skyengine
-      "RUNTIME_OUTPUT_DIRECTORY_${_SKYENGINE_CONFIG_UPPER}")
-    if(NOT _SKYENGINE_CONFIG_RUNTIME_DIR OR
-       _SKYENGINE_CONFIG_RUNTIME_DIR MATCHES "-NOTFOUND$")
-      set(_SKYENGINE_CONFIG_RUNTIME_DIR "${_SKYENGINE_RUNTIME_BASE}")
-      if(NOT _SKYENGINE_CONFIG_RUNTIME_DIR MATCHES "\\$<")
-        string(APPEND _SKYENGINE_CONFIG_RUNTIME_DIR "/${_SKYENGINE_CONFIG}")
-      endif()
-    endif()
-    string(APPEND _SKYENGINE_NATIVE_RUNTIME_DIR
-      "$<$<CONFIG:${_SKYENGINE_CONFIG}>:${_SKYENGINE_CONFIG_RUNTIME_DIR}>")
-  endforeach()
-else()
-  set(_SKYENGINE_NATIVE_RUNTIME_DIR "${_SKYENGINE_RUNTIME_BASE}")
-  if(CMAKE_BUILD_TYPE)
-    string(TOUPPER "${CMAKE_BUILD_TYPE}" _SKYENGINE_CONFIG_UPPER)
-    get_target_property(_SKYENGINE_CONFIG_RUNTIME_DIR skyengine
-      "RUNTIME_OUTPUT_DIRECTORY_${_SKYENGINE_CONFIG_UPPER}")
-    if(_SKYENGINE_CONFIG_RUNTIME_DIR AND
-       NOT _SKYENGINE_CONFIG_RUNTIME_DIR MATCHES "-NOTFOUND$")
-      set(_SKYENGINE_NATIVE_RUNTIME_DIR "${_SKYENGINE_CONFIG_RUNTIME_DIR}")
-    endif()
-  endif()
-endif()
-add_custom_target(skyengine-system-assets
-  COMMAND ${CMAKE_COMMAND} -E make_directory
-    "${_SKYENGINE_NATIVE_RUNTIME_DIR}/mythroad/system"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${_SKYENGINE_SYSTEM_ASSET_DIR}/gb12.uc2"
-    "${_SKYENGINE_NATIVE_RUNTIME_DIR}/mythroad/system/gb12.uc2"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${_SKYENGINE_SYSTEM_ASSET_DIR}/gb16.uc2"
-    "${_SKYENGINE_NATIVE_RUNTIME_DIR}/mythroad/system/gb16.uc2"
-  DEPENDS
-    "${_SKYENGINE_SYSTEM_ASSET_DIR}/gb12.uc2"
-    "${_SKYENGINE_SYSTEM_ASSET_DIR}/gb16.uc2"
-  COMMENT "Deploying Mythroad base fonts"
-  VERBATIM
-)
-# A custom dependency runs for every requested SkyEngine build; copy_if_different
-# keeps it cheap while restoring deleted assets without forcing a relink.
-add_dependencies(skyengine skyengine-system-assets)
-unset(_SKYENGINE_CONFIG_RUNTIME_DIR)
-unset(_SKYENGINE_CONFIG_UPPER)
-unset(_SKYENGINE_CONFIG)
-unset(_SKYENGINE_RUNTIME_BASE)
-unset(_SKYENGINE_NATIVE_RUNTIME_DIR)
-unset(_SKYENGINE_MULTI_CONFIG)
-unset(_SKYENGINE_SYSTEM_ASSET_DIR)
 
 # --- Wasm 构建（emcc）---
 # 用法: cmake --build build --target skyengine-wasm
@@ -501,10 +438,11 @@ if(SKYENGINE_BUILD_SHARED)
   set_target_properties(skyengine-shared PROPERTIES OUTPUT_NAME "skyengine")
   if(MSVC)
     skyengine_add_link_flags(skyengine-shared "/FORCE:MULTIPLE")
-    target_link_libraries(skyengine-shared ZLIB::ZLIB unicorn ws2_32)
+    target_link_libraries(skyengine-shared ZLIB::ZLIB unicorn ws2_32 gdi32 user32)
   else()
     skyengine_add_link_flags(skyengine-shared "-Wl,--allow-multiple-definition")
-    target_link_libraries(skyengine-shared unicorn "-Wl,--no-as-needed" m z)
+    target_link_libraries(skyengine-shared unicorn "-Wl,--no-as-needed" m z
+                          ${CMAKE_DL_LIBS})
     set_target_properties(skyengine-shared PROPERTIES C_VISIBILITY_PRESET hidden)
   endif()
 endif()

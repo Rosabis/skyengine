@@ -22,15 +22,29 @@ describe("golden 关键帧", () => {
   });
 
   const cases = [
-    // [golden 名, mrp, 启动等待 ms] —— 均为等待输入的静态画面
+    // 系统字体字形不具备跨平台逐像素稳定性，只豁免明确的文本矩形；
+    // 对话框布局、背景、图像和其他所有区域继续要求与 golden 完全一致。
     // wbrw-home 曾入选后被剔除:主页含时钟且内容跨运行可变(实测一轮差
     // 2404 像素),不满足"跨进程可复现"资格。
-    ["gzwdzjs-bgm-dialog", "test/fixtures/gzwdzjs.mrp", 5_000],
-    ["gxdzc-boot", "test/fixtures/gxdzc.mrp", 5_000],
+    {
+      name: "gzwdzjs-bgm-dialog",
+      mrp: "test/fixtures/gzwdzjs.mrp",
+      bootMs: 5_000,
+      allowedFontRects: [
+        { x: 80, y: 152, width: 72, height: 16 },
+        { x: 0, y: 296, width: 240, height: 16 },
+      ],
+    },
+    {
+      name: "gxdzc-boot",
+      mrp: "test/fixtures/gxdzc.mrp",
+      bootMs: 5_000,
+      allowedFontRects: [],
+    },
   ] as const;
 
-  for (const [name, mrp, bootMs] of cases) {
-    it(`${name} 全图与 golden 一致`, async () => {
+  for (const { name, mrp, bootMs, allowedFontRects } of cases) {
+    it(`${name} 非字体区域与 golden 一致`, async () => {
       ws = await SkyEngineWorkspace.create();
       engine = await SkyEngineE2e.start(mrp, { workDir: ws.dir });
       await engine.delay(bootMs);
@@ -40,7 +54,12 @@ describe("golden 关键帧", () => {
       await vi.waitFor(async () => {
         if (!engine) throw new Error("engine is undefined");
         const screen = await engine.screen(name);
-        expect(screen.diffPixelCount(golden)).toBe(0);
+        const totalDiff = screen.diffPixelCount(golden);
+        const allowedFontDiff = allowedFontRects.reduce(
+          (count, rect) => count + screen.diffPixelCount(golden, rect),
+          0,
+        );
+        expect(totalDiff - allowedFontDiff).toBe(0);
       }, { timeout: 20_000, interval: 1_500 });
     });
   }

@@ -15,19 +15,30 @@ describe("gtxzj 启动", () => {
   });
 
   it("通过启动画面并处理软键、方向键和确认键", async () => {
-    // 独立运行树同时提供基础字库，避免宿主存档和字体安装状态污染结果。
+    // 独立运行树避免宿主存档状态污染结果；文字由宿主系统字体绘制。
     ws = await SkyEngineWorkspace.create();
     engine = await SkyEngineE2e.start("test/fixtures/gtxzj.mrp", {
       workDir: ws.dir,
     });
 
     await engine.delay(4_000);
-    const soundMenu = await engine.waitForPixel(79, 160, [248, 0, 0], {
+    const soundMenu = await engine.waitForColorInRect([248, 0, 0], {
+      x: 60,
+      y: 145,
+      width: 120,
+      height: 50,
+    }, {
       name: "sound-menu",
       timeoutMs: 10_000,
       intervalMs: 200,
     });
-    expect(soundMenu.pixel(119, 120)).toEqual([248, 252, 248]);
+    // 字形和比例字宽随平台变化，按提示区域确认红色文字存在。
+    expect(soundMenu.colorPixelCount([248, 0, 0], {
+      x: 60,
+      y: 145,
+      width: 120,
+      height: 50,
+    })).toBeGreaterThan(20);
 
     // 右软键选择“关闭”后进入带人物立绘和“开始游戏”的标题画面。
     await engine.key("RIGHT_SOFT", 2_000);

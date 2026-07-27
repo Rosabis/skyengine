@@ -10,9 +10,7 @@ function pixelEquals(screen: PpmImage, x: number, y: number, expected: Rgb): boo
 function isOpeningFolderFrame(screen: PpmImage): boolean {
   return pixelEquals(screen, 194, 249, [24, 96, 216])
     && pixelEquals(screen, 150, 251, [0, 76, 200])
-    && pixelEquals(screen, 100, 216, [248, 252, 248])
-    && pixelEquals(screen, 8, 259, [232, 240, 248])
-    && pixelEquals(screen, 42, 269, [232, 240, 248]);
+    && pixelEquals(screen, 100, 216, [248, 252, 248]);
 }
 
 function isStartupOverlayFrame(screen: PpmImage): boolean {
@@ -99,16 +97,11 @@ describe("cookie 应用正常启动并且退出到文件管理器", () => {
     {
       await engine.key('LEFT_SOFT', 1_000, 250)
 
-      await vi.waitFor(async () => {
-        if (!engine) throw new Error("skyengine 未初始化");
-        // 主页面
-        const screen = await engine.screen("menu-first");
-        // rgb(248, 192, 32)
-        expect(screen.pixel(94, 166)).toEqual([248, 192, 32]);
-      }, {
-        timeout: 10_000,
-        interval: 1000
-      })
+      await engine.waitForColorInRect(
+        [248, 192, 32],
+        { x: 0, y: 150, width: 130, height: 45 },
+        { name: "menu-first", timeoutMs: 10_000, intervalMs: 1_000, minCount: 500 },
+      );
     }
     {
       await engine.key('UP', 1_000)
@@ -280,16 +273,11 @@ describe("cookie 应用正常启动并且退出到文件管理器", () => {
     {
       await engine.key('LEFT_SOFT', 1_000, 250)
 
-      await vi.waitFor(async () => {
-        if (!engine) throw new Error("skyengine 未初始化");
-        // 主页面
-        const screen = await engine.screen("menu-first");
-        // rgb(248, 192, 32)
-        expect(screen.pixel(94, 166)).toEqual([248, 192, 32]);
-      }, {
-        timeout: 10_000,
-        interval: 1000
-      })
+      await engine.waitForColorInRect(
+        [248, 192, 32],
+        { x: 0, y: 150, width: 130, height: 45 },
+        { name: "menu-first", timeoutMs: 10_000, intervalMs: 1_000, minCount: 500 },
+      );
     }
     {
       await engine.key('UP', 1_000)

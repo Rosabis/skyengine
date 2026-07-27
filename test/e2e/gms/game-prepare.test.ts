@@ -46,7 +46,10 @@ describe("gms 付费慢测试", () => {
       await engine.delay(1_000);
       const afterRight = await engine.screen("start");
       // rgb(40, 80, 248)
-      expect(afterRight.pixel(113, 293)).toEqual([40, 80, 248]);
+      expect(afterRight.colorPixelCount(
+        [40, 80, 248],
+        { x: 60, y: 286, width: 120, height: 24 },
+      )).toBeGreaterThan(20);
 
       for (let i=0; i< 28; i++) {
         await engine.key('ENTER', 1_000)

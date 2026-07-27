@@ -119,10 +119,14 @@ describe("optwar 进入主菜单", () => {
       const screen = await engine.screen("download-result");
       // rgb(248, 0, 0)
       expect(screen.pixel(134, 146)).not.toEqual([248, 0, 0]);
-      // rgb(0, 0, 0)
-      expect(screen.pixel(107, 151)).toEqual([0, 0, 0]);
-      // rgb(248, 252, 248)
-      expect(screen.pixel(32, 301)).toEqual([248, 252, 248]);
+      expect(screen.colorPixelCount(
+        [0, 0, 0],
+        { x: 40, y: 135, width: 160, height: 40 },
+      )).toBeGreaterThan(5);
+      expect(screen.colorPixelCount(
+        [248, 252, 248],
+        { x: 0, y: 294, width: 240, height: 26 },
+      )).toBeGreaterThan(5);
     }
     {
       // 启动营销商店。这个按键会先进入插件文件/网络启动路径，不保证在

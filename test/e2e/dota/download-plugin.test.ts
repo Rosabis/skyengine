@@ -168,15 +168,13 @@ describe("dota pixel flow", () => {
     {
       // 点击确定，下载浏览器插件，进入下载结果界面
       await engine.key('LEFT_SOFT', 1_000);
-      await vi.waitFor(async () => {
-        if (!engine) throw new Error('skyengine not defined')
-        const screen = await engine.screen("download-result");
-        // rgb(0, 252, 0)
-        expect(screen.pixel(152, 146)).toEqual([0, 252, 0]);
-      }, {
-        timeout: 20_000,
-        interval: 1_000
-      })
+      await engine.waitForColorInRect(
+        [0, 252, 0],
+        // The progress bar uses the same green below y=160; only the result
+        // text region proves that the download has actually completed.
+        { x: 20, y: 120, width: 200, height: 40 },
+        { name: "download-result", timeoutMs: 20_000, intervalMs: 1_000, minCount: 5 },
+      );
     }
     {
       // 点击确定，确认下载结果，开始加载浏览器
@@ -189,7 +187,7 @@ describe("dota pixel flow", () => {
       let screen = await engine.screen("download-browser-components");
       expect(screen.uniqueColorCount()).toBeGreaterThan(100);
       expect(screen.pixel(95, 88)).not.toEqual([0, 0, 0]);
-      expect(screen.pixel(120, 190)).not.toEqual([0, 0, 0]);
+      expect(screen.pixel(120, 190)).toEqual([40, 68, 160]);
     }
     {
       const before = await engine.drawCount();

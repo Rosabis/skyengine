@@ -99,6 +99,12 @@ typedef struct {
                                  uint32 dataLen, int32 loop);
     int32 (*mr_stopSoundChannel)(int32 handle);
 
+    /* 字体由宿主平台选择和栅格化。字段追加在既有函数区末尾；DSM 与宿主
+     * 必须用本头文件同步重编译。返回值是逐行紧凑排列的 1bpp 位图
+     * (MSB first),且 width*height 不超过 ARM table[30] 的 32 字节槽位。 */
+    const uint8 *(*font_get_glyph)(uint16 ch, uint16 pixel_height,
+                                   int32 *width, int32 *height);
+
     // 变量放在最后
     int32 flags;  // 调整运行时的一些参数，目前只有调整文件系统路径名是否使用UTF8编码这一个功能
     int32 screen_width;

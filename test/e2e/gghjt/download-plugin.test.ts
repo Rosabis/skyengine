@@ -222,11 +222,11 @@ describe("gghjt pixel flow", () => {
     // 检查屏幕是否成功的绿色
     const downloading = await engine.screen("download-ing");
     expect(downloading.pixel(70, 176)).toEqual([0, 252, 0]);
-    // 等待下载完成
-    await engine.delay(10_000);
-    // 检查屏幕是否成功的绿色
-    const success = await engine.screen("download-end");
-    expect(success.pixel(101, 148)).toEqual([0, 252, 0]);
+    await engine.waitForColorInRect(
+      [0, 252, 0],
+      { x: 20, y: 120, width: 200, height: 40 },
+      { name: "download-end", timeoutMs: 20_000, intervalMs: 1_000, minCount: 5 },
+    );
   
     // 点击确定进入付费界面
     await engine.click(15, 308, 1_000);
@@ -305,16 +305,11 @@ describe("gghjt pixel flow", () => {
       timeout: 20_000,
       interval: 1_000
     })
-    // 等待下载完成
-    await vi.waitFor(async () => {
-      if (!engine) throw new Error('skyengine not defined')
-      // 检查屏幕是否成功的绿色
-      const success = await engine.screen("download-end");
-      expect(success.pixel(101, 148)).toEqual([0, 252, 0]);
-    }, {
-      timeout: 20_000,
-      interval: 1_000
-    })
+    await engine.waitForColorInRect(
+      [0, 252, 0],
+      { x: 20, y: 120, width: 200, height: 40 },
+      { name: "download-end", timeoutMs: 20_000, intervalMs: 1_000, minCount: 5 },
+    );
 
     // 替换netpay.mrp
     cpSync('test/fixtures/plugins/netpay.mrp', ws.path('mythroad/plugins/netpay.mrp'), { force: true });
@@ -325,7 +320,10 @@ describe("gghjt pixel flow", () => {
     await engine.delay(2_000);
     const pay = await engine.screen("pay-start");
     expect(pay.pixel(104, 147)).toEqual([104, 104, 224]);
-    expect(pay.pixel(12, 302)).toEqual([248, 252, 248]);
+    expect(pay.colorPixelCount(
+      [248, 252, 248],
+      { x: 0, y: 294, width: 240, height: 26 },
+    )).toBeGreaterThan(0);
 
     {
       // 取消下载返回主菜单
@@ -420,11 +418,11 @@ describe("gghjt pixel flow", () => {
     // 检查屏幕是否成功的绿色
     const downloading = await engine.screen("download-ing");
     expect(downloading.pixel(70, 176)).toEqual([0, 252, 0]);
-    // 等待下载完成
-    await engine.delay(10_000);
-    // 检查屏幕是否成功的绿色
-    const success = await engine.screen("download-end");
-    expect(success.pixel(101, 148)).toEqual([0, 252, 0]);
+    await engine.waitForColorInRect(
+      [0, 252, 0],
+      { x: 20, y: 120, width: 200, height: 40 },
+      { name: "download-end", timeoutMs: 20_000, intervalMs: 1_000, minCount: 5 },
+    );
   
     // 点击确定进入付费界面
     await engine.click(15, 308, 1_000);

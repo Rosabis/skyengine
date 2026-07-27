@@ -17,8 +17,6 @@ var Module = typeof Module !== 'undefined' ? Module : {};
             "/mythroad/plugins/netpay.mrp", // 支付模块
             "/mythroad/plugins/flaengine.mrp", // flash播放器
             "/mythroad/plugins/ose/brwcore.mrp", // 冒泡浏览器插件
-            "/mythroad/system/gb12.uc2",  // 12号字体
-            "/mythroad/system/gb16.uc2",  // 16号字体
         ];
 
 

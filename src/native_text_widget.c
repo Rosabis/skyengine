@@ -1,11 +1,10 @@
 #include "./include/native_text_widget.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "./include/bridge.h"
-#include "./include/file_lib.h"
+#include "./include/platform_font.h"
 #include "./include/types.h"
 #include "./include/skyengine.h"
 
@@ -16,9 +15,8 @@
  *   MR_DIALOG_OK(0)/MR_DIALOG_OK_CANCEL(1)/MR_DIALOG_CANCEL(2),决定底部
  *   出现"确定"(左软键)/"取消"(右软键)哪些按钮;用户选择按钮时平台通过
  *   mr_event(MR_DIALOG_EVENT, MR_DIALOG_KEY_OK/CANCEL) 通知应用。
- * - 渲染直接读取 Mythroad 平台字库 system/gb16.uc2(UCS2 码点索引,每字
- *   32 字节,16 行 x 2 字节,MSB 在左;ASCII 宽 8,汉字宽 16),与 DSM 层
- *   xl_font_sky16_drawChar 的解码方式一致,避免依赖 DSM 内部 static 函数。
+ * - 渲染复用宿主平台的系统字体栅格模块,与普通 mr_drawText 文本保持一致,
+ *   不依赖工作目录中的 system/gb16.uc2。
  * - 文本框显示期间 guest 的上屏帧被 capture_frame 截留进"显示镜像",
  *   关闭时把镜像整帧重推上屏:恢复的是应用最后一帧画面本身,不要求应用
  *   收到取消事件后主动重绘(部分应用只弹出模态状态,不重绘背景)。
@@ -36,9 +34,6 @@
 #define TW_BODY_Y (TW_TITLE_Y + TW_CHAR_H + 8)
 #define TW_SOFTBAR_H 26
 #define TW_LABEL_MARGIN_X 4
-
-/* gb16.uc2 字库:每字符 32 字节 */
-#define TW_FONT_BYTES_PER_CHAR 32
 
 typedef struct {
     int active;
@@ -62,33 +57,10 @@ static int tw_mirror_valid = 0;
 /* 文本框自身上屏时置位,防止把文本页写进镜像/被自己截留 */
 static int tw_presenting = 0;
 
-/* ---------------- 字库 ---------------- */
-
-static int32_t tw_font_fd = 0;
-
-/* 打开平台 16px 字库。失败返回 0:调用方按 MR_FAILED 处理,不做降级绘制。
- * 路径说明:进程已 chdir 到 --work-dir(skyengine.c),guest 文件系统根对应宿主
- * "mythroad/"(dsm.c MYTHROAD_PATH),故 guest 的 system/gb16.uc2 在宿主侧
- * 是 mythroad/system/gb16.uc2;my_open 接受宿主相对路径。 */
-static int tw_font_open(void) {
-    if (tw_font_fd > 0) return 1;
-    tw_font_fd = my_open("mythroad/system/gb16.uc2", MR_FILE_RDONLY);
-    return tw_font_fd > 0;
-}
-
 static int tw_char_width(uint16_t ch) {
-    return ch < 128 ? 8 : 16;
-}
-
-/* 读取一个字符的 16 行点阵(每行 uint16,MSB 为最左像素) */
-static int tw_font_glyph(uint16_t ch, uint16_t rows[TW_CHAR_H]) {
-    uint8_t buf[TW_FONT_BYTES_PER_CHAR];
-    if (my_seek(tw_font_fd, (int32_t)ch * TW_FONT_BYTES_PER_CHAR, 0) < 0) return 0;
-    if (my_read(tw_font_fd, buf, TW_FONT_BYTES_PER_CHAR) != TW_FONT_BYTES_PER_CHAR) return 0;
-    for (int iy = 0; iy < TW_CHAR_H; iy++) {
-        rows[iy] = (uint16_t)((buf[iy * 2] << 8) | buf[iy * 2 + 1]);
-    }
-    return 1;
+    int width = 0;
+    if (!platform_font_glyph(ch, TW_CHAR_H, &width, NULL)) return 0;
+    return width;
 }
 
 /* ---------------- UCS2 字符串工具 ---------------- */
@@ -112,16 +84,18 @@ static uint16_t *tw_ucs2be_dup(const char *s) {
 /* ---------------- 渲染 ---------------- */
 
 static void tw_draw_char(uint16_t *page, int pw, int ph, uint16_t ch, int x, int y) {
-    uint16_t rows[TW_CHAR_H];
-    if (!tw_font_glyph(ch, rows)) return;
-    int w = tw_char_width(ch);
-    for (int iy = 0; iy < TW_CHAR_H; iy++) {
+    int w = 0;
+    int h = 0;
+    const uint8_t *bitmap = platform_font_glyph(ch, TW_CHAR_H, &w, &h);
+    if (!bitmap || w <= 0 || h <= 0 || w * h > 256) return;
+    for (int iy = 0; iy < h; iy++) {
         int py = y + iy;
         if (py < 0 || py >= ph) continue;
         for (int ix = 0; ix < w; ix++) {
             int px = x + ix;
+            int bit = iy * w + ix;
             if (px < 0 || px >= pw) continue;
-            if (rows[iy] & (uint16_t)(1u << (15 - ix))) {
+            if (bitmap[bit >> 3] & (uint8_t)(0x80u >> (bit & 7))) {
                 page[(size_t)py * (size_t)pw + (size_t)px] = TW_COLOR_TEXT;
             }
         }
@@ -291,8 +265,8 @@ int32_t native_text_widget_create(const char *title_ucs2be, const char *text_ucs
     if (type != MR_DIALOG_OK && type != MR_DIALOG_OK_CANCEL && type != MR_DIALOG_CANCEL) {
         return MR_FAILED;
     }
-    if (!tw_font_open()) {
-        /* 平台字库缺失时无法按契约渲染,保持原有的失败语义 */
+    if (!platform_font_init()) {
+        /* 系统字体不可用时无法按契约渲染,显式返回失败。 */
         return MR_FAILED;
     }
     uint16_t *title = tw_ucs2be_dup(title_ucs2be);

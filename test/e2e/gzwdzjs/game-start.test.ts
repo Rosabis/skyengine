@@ -28,7 +28,10 @@ describe("gzwdzjs 进入主菜单", () => {
     // 
     expect(boot.pixel(94, 59)).toEqual([0, 0, 0]);
     // rgb(0, 252, 24)
-    expect(boot.pixel(132, 158)).toEqual([0, 252, 24]);
+    expect(boot.colorPixelCount(
+      [0, 252, 24],
+      { x: 80, y: 145, width: 80, height: 35 },
+    )).toBeGreaterThan(100);
 
     {
       // 是否开启音乐？-> 否
@@ -133,7 +136,10 @@ describe("gzwdzjs 进入主菜单", () => {
     // 
     expect(boot.pixel(94, 59)).toEqual([0, 0, 0]);
     // rgb(0, 252, 24)
-    expect(boot.pixel(132, 158)).toEqual([0, 252, 24]);
+    expect(boot.colorPixelCount(
+      [0, 252, 24],
+      { x: 80, y: 145, width: 80, height: 35 },
+    )).toBeGreaterThan(100);
 
     {
       // 是否开启音乐？-> 否

@@ -41,6 +41,7 @@ export interface PpmImage {
   height: number;
   pixel(x: number, y: number): Rgb;
   uniqueColorCount(): number;
+  colorPixelCount(color: Rgb, rect?: { x: number; y: number; width: number; height: number }): number;
   diffPixelCount(other: PpmImage, rect?: { x: number; y: number; width: number; height: number }): number;
 }
 
@@ -242,6 +243,33 @@ export class SkyEngineE2e {
     );
   }
 
+  /** 等待指定区域出现至少 minCount 个目标颜色像素，适合平台字体等非固定字形。 */
+  async waitForColorInRect(
+    expected: Rgb,
+    rect: { x: number; y: number; width: number; height: number },
+    options: { name?: string; timeoutMs?: number; intervalMs?: number; minCount?: number } = {}
+  ): Promise<PpmImage> {
+    const {
+      name = "wait-color-region",
+      timeoutMs = 60_000,
+      intervalMs = 1_000,
+      minCount = 1,
+    } = options;
+    const deadline = Date.now() + timeoutMs;
+    let lastCount = 0;
+    for (;;) {
+      const screen = await this.screen(name);
+      lastCount = screen.colorPixelCount(expected, rect);
+      if (lastCount >= minCount) return screen;
+      if (Date.now() + intervalMs > deadline) break;
+      await sleep(intervalMs);
+    }
+    throw new Error(
+      `Region (${rect.x},${rect.y},${rect.width},${rect.height}) did not contain ${minCount} ` +
+      `rgb(${expected.join(",")}) pixels within ${timeoutMs}ms; last count was ${lastCount}`
+    );
+  }
+
   async command(command: string, timeoutMs = this.timeoutMs): Promise<string> {
     return new Promise((resolve, reject) => {
       const socket = createConnection(this.socketPath);
@@ -417,6 +445,22 @@ export async function readPpm(filePath: string): Promise<PpmImage> {
         colors.add((pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2]);
       }
       return colors.size;
+    },
+    colorPixelCount(color: Rgb, rect = { x: 0, y: 0, width, height }): number {
+      let count = 0;
+      const x0 = Math.max(0, rect.x);
+      const y0 = Math.max(0, rect.y);
+      const x1 = Math.min(width, rect.x + rect.width);
+      const y1 = Math.min(height, rect.y + rect.height);
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const index = (y * width + x) * 3;
+          if (pixels[index] === color[0] && pixels[index + 1] === color[1] && pixels[index + 2] === color[2]) {
+            count++;
+          }
+        }
+      }
+      return count;
     },
     diffPixelCount(other: PpmImage, rect = { x: 0, y: 0, width, height }): number {
       if (other.width !== width || other.height !== height) {

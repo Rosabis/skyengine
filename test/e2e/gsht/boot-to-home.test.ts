@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, it } from "vitest";
 import { SkyEngineE2e, SkyEngineWorkspace } from "../engine-e2e.js";
-import fs from "fs";
 
 describe("gsht", () => {
   let engine: SkyEngineE2e | undefined;
@@ -20,17 +19,11 @@ describe("gsht", () => {
     // gsht
     engine = await SkyEngineE2e.start("test/fixtures/gsht_v1015.mrp", { workDir: ws.dir, memory: '2M' });
 
-    {
-      await vi.waitFor(async () => {
-        if (!engine) throw new Error("skyengine 未初始化");
-        const screen = await engine.screen("bgm-select");
-        // rgb(248, 252, 248)
-        expect(screen.pixel(145, 158)).toEqual([248, 252, 248]);
-      }, {
-        timeout: 30_000,
-        interval: 1000
-      })
-    }
+    await engine.waitForColorInRect(
+      [248, 252, 248],
+      { x: 0, y: 294, width: 240, height: 26 },
+      { name: "bgm-select", timeoutMs: 30_000, intervalMs: 1_000, minCount: 5 },
+    );
   });
   
 });

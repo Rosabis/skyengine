@@ -118,7 +118,7 @@ CMake 配置阶段会获取 zlib 和 SDL2，构建后会把 `SDL2.dll` 复制到
 
 `--work-dir` 不只是进程的当前目录，也是模拟器映射 MRP 文件系统时使用的根目录。桌面程序默认使用可执行文件所在目录；从源码树运行时建议显式传入 `--work-dir .`。
 
-仓库根目录的 `mythroad` 符号链接指向 `wasm/dist/fs/mythroad`。其中包含默认入口、字体和部分系统插件，例如：
+仓库根目录的 `mythroad` 符号链接指向 `wasm/dist/fs/mythroad`。其中包含默认入口和部分系统插件，例如：
 
 ```text
 mythroad/
@@ -127,14 +127,11 @@ mythroad/
 │   ├── netpay.mrp
 │   ├── flaengine.mrp
 │   └── ose/brwcore.mrp
-└── system/
-    ├── gb12.uc2
-    └── gb16.uc2
 ```
 
-MRP 自己下载或生成的文件也会写入该工作目录下的 `mythroad/`。若应用提示字体、插件或资源不存在，首先检查工作目录是否正确，以及所需文件是否确实存在。项目不会随源码提供所有历史 MRP 应用和厂商在线服务。
+MRP 自己下载或生成的文件也会写入该工作目录下的 `mythroad/`。若应用提示插件或资源不存在，首先检查工作目录是否正确，以及所需文件是否确实存在。项目不会随源码提供所有历史 MRP 应用和厂商在线服务。
 
-构建桌面版 `skyengine` 时，基础字库会自动复制到可执行文件目录下的 `mythroad/system/`，因此直接运行 `build/skyengine /path/to/app.mrp` 也能在默认工作目录中渲染中文文本。
+文本由宿主平台的系统字体渲染，不再读取或部署 `mythroad/system/gb12.uc2`、`gb16.uc2`。Windows 使用系统消息字体和 GDI，Linux 通过 Fontconfig 选择覆盖中文的 sans 字体，Android 从系统字体目录选择覆盖拉丁文和中文的字体，WebAssembly 使用浏览器 Canvas 的 `system-ui`。Linux 运行环境必须安装 Fontconfig 运行库和至少一套中文系统字体。
 
 命令行传入的 MRP 会先解析为绝对路径，再切换到工作目录。受旧 Mythroad ABI 限制，最终 MRP 路径必须短于 128 字节；路径过长时请把文件移到更短的位置。
 

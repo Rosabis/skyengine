@@ -48,7 +48,12 @@ describe("设备日期配置", () => {
     engine = await SkyEngineE2e.start("test/fixtures/gtxzj.mrp", { workDir: ws.dir });
 
     await engine.delay(4_000);
-    await engine.waitForPixel(79, 160, [248, 0, 0], {
+    await engine.waitForColorInRect([248, 0, 0], {
+      x: 60,
+      y: 145,
+      width: 120,
+      height: 50,
+    }, {
       name: "env-date-sound-menu",
       timeoutMs: 10_000,
       intervalMs: 200,
@@ -64,7 +69,12 @@ describe("设备日期配置", () => {
     });
 
     await engine.delay(4_000);
-    await engine.waitForPixel(79, 160, [248, 0, 0], {
+    await engine.waitForColorInRect([248, 0, 0], {
+      x: 60,
+      y: 145,
+      width: 120,
+      height: 50,
+    }, {
       name: "cli-date-sound-menu",
       timeoutMs: 10_000,
       intervalMs: 200,
