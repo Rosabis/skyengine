@@ -1,6 +1,6 @@
 # Wiki Index
 
-> 47 pages | Last updated: 2026-07-26T09:58:21.885Z
+> 48 pages | Last updated: 2026-07-29T11:52:18.738Z
 
 ## debugging
 
@@ -47,6 +47,7 @@
 
 ## session-log
 
+- [DOTA legacy proxy page loading progress 2026-07-29](dota-legacy-proxy-page-loading-progress-2026-07-29.md) — # DOTA legacy proxy page loading progress 2026-07-29
 - [WBRW Go html2sky rendering final verification 2026-07-12](wbrw-go-html2sky-rendering-final-verification-2026-07-12.md) — # WBRW Go html2sky rendering final verification 2026-07-12
 - [WBRW Go html2sky rendering progress 2026-07-12](wbrw-go-html2sky-rendering-progress-2026-07-12.md) — # WBRW Go html2sky rendering progress 2026-07-12
 - [WBRW html2sky completion audit 2026-07-12 latest](wbrw-html2sky-completion-audit-2026-07-12-latest.md) — # WBRW html2sky completion audit 2026-07-12 latest
