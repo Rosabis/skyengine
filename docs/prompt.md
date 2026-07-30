@@ -641,10 +641,10 @@ tool/server-http.js已启动，修改tool/proxy.js来实现代理服务器。
 记得存储记忆数据。
 
 工作区中的修改是修复以下以下产生的，分析修改是不是太冗余了，寻找更简洁的修正方案。
-测试用例`pnpm vitest run test/e2e/optwar/game-play.test.ts`执行后，虽然执行用例会通过，但实际“取消支付”步骤实际花费时间是大于1秒的。
+测试用例`pnpm vitest run test/e2e/optwar/game-play.test.ts -t 广告`执行后，最终会报错。
 
-预期结果：“取消支付”步骤不卡顿。
-实际结果：“取消支付”步骤卡住1秒以上，测试用例本身的timeout计时疑似被影响。
+预期结果：不会报错。
+实际结果：rm_ext_executor: uc_emu_start(0xE800B0) failed: 8 (Invalid memory fetch (UC_ERR_FETCH_UNMAPPED))。
 
 程序的现有代码不一定正确。
 注意trace日志量会特别大。
@@ -654,6 +654,7 @@ tool/server-http.js已启动，修改tool/proxy.js来实现代理服务器。
 你可以检测PPM，来验证修复是否成功。
 不能写硬编码代码，如if(is_xxx_app()) {...}
 禁止硬编码
+做最小化修改，禁止一直大量新增代码。
 
 在分析与解决过程中，把进度定期保存至文档中。
 先不管其它测试用例，先修好BUG，最后一定要去兼容其它测试用例。
