@@ -641,10 +641,10 @@ tool/server-http.js已启动，修改tool/proxy.js来实现代理服务器。
 记得存储记忆数据。
 
 工作区中的修改是修复以下以下产生的，分析修改是不是太冗余了，寻找更简洁的修正方案。
-测试用例`pnpm vitest run test/e2e/optwar/game-play.test.ts -t 广告`执行后，最终会报错。
+测试用例`pnpm vitest run test/e2e/optwar/game-play.test.ts -t 突然加速`执行后，“返回游戏界面”后，会突然加速。
 
-预期结果：不会报错。
-实际结果：rm_ext_executor: uc_emu_start(0xE800B0) failed: 8 (Invalid memory fetch (UC_ERR_FETCH_UNMAPPED))。
+预期结果：游戏最终保持正常速度。
+实际结果：“返回游戏界面”后，会突然加速。
 
 程序的现有代码不一定正确。
 注意trace日志量会特别大。
