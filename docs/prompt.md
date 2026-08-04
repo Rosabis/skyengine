@@ -661,10 +661,11 @@ tool/server-http.js已启动，修改tool/proxy.js来实现代理服务器。
 充分利用子Agent。
 记得存储记忆数据。
 
-测试用例`pnpm vitest run test/e2e/optwar/game-play.test.ts -t 突然加速1`执行后，“返回游戏界面”后，会突然加速。
+测试用例`pnpm vitest run test/e2e/optwar/game-play.test.ts -t 突然加速1`执行后，先进入广告插件，然后“返回游戏界面”后，会突然加速。
 
 预期结果：游戏最终保持正常速度。
-实际结果：“返回游戏界面”后，会突然加速。
+实际结果：先进入广告插件，“返回游戏界面”后，会突然加速。
+`third_party`目录中有一些SKY平台代码，可能有参考价值。
 
 程序的现有代码不一定正确。
 注意trace日志量会特别大。
