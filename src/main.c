@@ -906,9 +906,37 @@ static void abort_handler(int sig) {
     raise(SIGABRT);
 }
 static LONG WINAPI win_exception_filter(EXCEPTION_POINTERS *ep) {
+    const EXCEPTION_RECORD *record = ep->ExceptionRecord;
+    const CONTEXT *context = ep->ContextRecord;
+    const void *image_base = (const void *)GetModuleHandleW(NULL);
     fprintf(stderr, "[CRASH] Unhandled exception: code=0x%08lX addr=%p\n",
-        ep->ExceptionRecord->ExceptionCode,
-        ep->ExceptionRecord->ExceptionAddress);
+        record->ExceptionCode, record->ExceptionAddress);
+    /* ASLR makes a raw PC insufficient for matching optimized Windows builds to
+     * dumpbin/PDB output. Keep the module-relative address and failed access in
+     * the crash log so Release-only faults remain reproducible without a JIT debugger. */
+    fprintf(stderr, "[CRASH] image_base=%p rva=0x%llX\n", image_base,
+            (unsigned long long)((uintptr_t)record->ExceptionAddress -
+                                 (uintptr_t)image_base));
+    if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+        record->NumberParameters >= 2) {
+        const char *operation = record->ExceptionInformation[0] == 0 ? "read" :
+                                record->ExceptionInformation[0] == 1 ? "write" :
+                                record->ExceptionInformation[0] == 8 ? "execute" :
+                                "unknown";
+        fprintf(stderr, "[CRASH] access=%s target=%p\n", operation,
+                (void *)record->ExceptionInformation[1]);
+    }
+#if defined(_M_X64)
+    fprintf(stderr,
+            "[CRASH] rip=%016llX rsp=%016llX rbp=%016llX rbx=%016llX\n"
+            "[CRASH] rcx=%016llX rdx=%016llX rsi=%016llX rdi=%016llX\n"
+            "[CRASH] r8 =%016llX r9 =%016llX r10=%016llX r11=%016llX\n"
+            "[CRASH] r12=%016llX r13=%016llX r14=%016llX r15=%016llX\n",
+            context->Rip, context->Rsp, context->Rbp, context->Rbx,
+            context->Rcx, context->Rdx, context->Rsi, context->Rdi,
+            context->R8, context->R9, context->R10, context->R11,
+            context->R12, context->R13, context->R14, context->R15);
+#endif
     fflush(stderr);
     return EXCEPTION_CONTINUE_SEARCH;
 }
