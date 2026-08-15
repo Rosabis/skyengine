@@ -83,7 +83,7 @@ export class SkyEngineE2e {
     this.stdoutPath = path.join(tmpDir, "stdout.log");
     this.stderrPath = path.join(tmpDir, "stderr.log");
     this.defaultScreenPath = path.join(tmpDir, "screen.ppm");
-    this.bin = options.bin ?? process.env.VMRP_BIN ?? defaultSkyEngineBin();
+    this.bin = resolveSkyEngineBin(options.bin);
     this.workDir = options.workDir ?? process.env.SKYENGINE_WORK_DIR ?? ".";
     this.timeoutMs = options.timeoutMs ?? Number(process.env.VMRP_TIMEOUT_MS ?? 30_000);
     this.dnsMap = options.dnsMap;
@@ -383,6 +383,15 @@ export function defaultSkyEngineBin(): string {
   return process.platform === "win32"
     ? "build/Release/skyengine.exe"
     : "build/skyengine";
+}
+
+/**
+ * Keep direct spawn callers on the same executable selection as SkyEngineE2e.
+ * CI flattens packaged binaries into build/, so VMRP_BIN must win over the
+ * multi-config Windows default even when no SkyEngineE2e instance is created.
+ */
+export function resolveSkyEngineBin(bin?: string): string {
+  return bin ?? process.env.VMRP_BIN ?? defaultSkyEngineBin();
 }
 
 function controlEndpoint(tmpDir: string): string {

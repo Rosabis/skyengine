@@ -46,6 +46,13 @@
   换行后，`gsha` 与公共 `stop()` 日志刷新定向回归 2/2 通过。
 - [x] 最终 Windows `pnpm test:e2e`：38/38 文件、64/64 用例通过，耗时
   230.10 秒；没有重试失败、IPC 错误或临时目录清理错误。
+- [x] 后续 CI 发现 `gtxzj/device-date` 的 6 个同步启动用例绕过 `VMRP_BIN`，
+  因此错误查找本地 MSVC 默认路径 `build/Release/skyengine.exe`，而不是解压后的
+  `build/skyengine.exe`。现已集中二进制解析逻辑，并新增 `VMRP_BIN` 优先级回归测试。
+- [x] 设置 `VMRP_BIN` 后定向运行 `gtxzj/device-date.test.ts`，1/1 文件、10/10
+  用例通过；`pnpm exec tsc --noEmit` 与 `git diff --check` 同时通过。
+- [x] 按 CI 方式设置 `VMRP_BIN` 后再次运行 Windows 全量 `pnpm test:e2e`：
+  38/38 文件、65/65 用例通过，耗时 227.87 秒。
 
 ## 最终结论
 
