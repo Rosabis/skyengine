@@ -1,6 +1,6 @@
 # Wiki Index
 
-> 51 pages | Last updated: 2026-08-14T12:01:39.263Z
+> 52 pages | Last updated: 2026-08-15T05:33:10.856Z
 
 ## debugging
 
@@ -16,6 +16,7 @@
 - [DOTA download-browser-components transition frame fix](dota-download-browser-components-transition-frame-fix.md) — # DOTA download-browser-components transition frame fix
 - [DOTA download-browser-components waiting hypothesis invalidated](dota-download-browser-components-waiting-hypothesis-invalidated.md) — # DOTA download-browser-components waiting hypothesis invalidated
 - [gfhcq game stutter performance investigation](gfhcq-game-stutter-performance-investigation.md) — # gfhcq game stutter performance investigation
+- [gfktjc transition text residue debugging progress](gfktjc-transition-text-residue-debugging-progress.md) — # gfktjc transition text residue debugging progress
 - [gghjt modal timer and cold extraction regressions](gghjt-modal-timer-and-cold-extraction-regressions.md) — # gghjt modal timer and cold extraction regressions
 - [GJXQY local download protocol and fixture ID mismatch](gjxqy-local-download-protocol-and-fixture-id-mismatch.md) — # GJXQY local download protocol and fixture ID mismatch
 - [GJXQY missing installed resource black scene](gjxqy-missing-installed-resource-black-scene.md) — # GJXQY missing installed resource black scene

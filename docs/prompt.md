@@ -699,7 +699,10 @@ tool/server-http.js已启动，修改tool/proxy.js来实现代理服务器。
 充分利用子Agent。
 记得存储记忆数据。
 
-测试用例`pnpm vitest run test/e2e/optwar/temp.test.ts`执行后，游戏表现比较卡顿，分析热点，优化执行速度。
+测试用例`pnpm vitest run test/e2e/gfktjc/render.test.ts`执行后，游戏渲染有问题。
+
+预期：从“图形加速”界面进入“开启音乐？”界面后，不应该再显示“图形加速”相关文字。
+实际：从“图形加速”界面进入“开启音乐？”界面后，“图形加速”相关文字残留叠加，导致画面渲染异常。
 
 程序的现有代码不一定正确。
 注意trace日志量会特别大。
