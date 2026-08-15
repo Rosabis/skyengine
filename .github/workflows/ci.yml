@@ -142,38 +142,39 @@ jobs:
           sudo apt-get install -y libsdl2-2.0-0 zlib1g
 
       - name: Setup pnpm
-        if: runner.os == 'Linux'
         uses: pnpm/action-setup@v4
         with:
           version: 10
           run_install: false
 
       - name: Setup Node.js
-        if: runner.os == 'Linux'
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
 
       - name: Install test dependencies
-        if: runner.os == 'Linux'
         run: pnpm install --frozen-lockfile
 
       - name: Run Vitest
-        if: runner.os == 'Linux'
         id: vitest
         env:
-          VMRP_BIN: build/skyengine
-          VMRP_PPM: "1"
+          # Build artifacts are flattened into build/ by the extraction steps above.
+          VMRP_BIN: ${{ runner.os == 'Windows' && 'build/skyengine.exe' || 'build/skyengine' }}
+          # main.c updates the latest PPM after every draw when SKYENGINE_PPM is set.
+          SKYENGINE_PPM: "1"
           VMRP_E2E_KEEP_TMP: "1"
+          # Keep failure artifacts at one cross-platform path for the upload step.
+          TEMP: ${{ runner.temp }}
+          TMPDIR: ${{ runner.temp }}
         run: pnpm test:e2e
 
       - name: Upload last frames
-        if: runner.os == 'Linux' && failure() && steps.vitest.outcome == 'failure'
+        if: failure() && steps.vitest.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: vitest-last-frames-${{ matrix.platform }}-${{ github.run_attempt }}
-          path: /tmp/skyengine-e2e-*/screen.ppm
+          path: ${{ runner.temp }}/skyengine-e2e-*/screen.ppm
           if-no-files-found: warn
 
   publish:
