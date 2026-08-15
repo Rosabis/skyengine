@@ -158,4 +158,46 @@ describe("aqcw", () => {
       );
     }
   });
+  it("下载插件", async () => {
+    // 每个用例使用独立的 mythroad 数据副本,避免并发执行时互相覆盖插件/缓存/存档。
+    ws = await SkyEngineWorkspace.create();
+    // 测试拥有独立服务进程和系统分配端口，避免依赖外部进程或固定端口。
+    payServer = await startPayServer();
+    // 删除后，继续游戏会进入下载浏览器插件界面。
+    engine = await SkyEngineE2e.start("test/fixtures/aqcw_v1101.mrp", {
+      workDir: ws.dir,
+    });
+
+    await vi.waitFor(
+      async () => {
+        const screen = await engine!.screen("main");
+        // rgb(216, 216, 216)
+        expect(screen.pixel(158, 12)).toEqual([216, 216, 216]);
+      },
+      {
+        timeout: 10_000,
+        interval: 1_000,
+      },
+    );
+
+    await engine.key("DOWN", 1_000);
+    await engine.delay(1_000);
+
+    {
+      await engine.key("DOWN", 1_000);
+      await engine.key("ENTER", 1_000);
+      await engine.key("LEFT_SOFT", 1_000);
+      await vi.waitFor(
+        async () => {
+          const screen = await engine!.screen("pay");
+          // rgb(248, 0, 0)
+          expect(screen.pixel(106, 145)).toEqual([248, 0, 0]);
+        },
+        {
+          timeout: 10_000,
+          interval: 1_000,
+        },
+      );
+    }
+  });
 });
