@@ -21,7 +21,12 @@ const execFileAsync = promisify(execFile);
 
 async function startPayServer(): Promise<PayServer> {
   const tempDir = await mkdtemp(path.join(tmpdir(), "skymobi-pay-server-"));
-  const binary = path.join(tempDir, "skymobi-pay-server");
+  // Go emits a PE executable on Windows; use its real filename so Node can spawn it
+  // when this opt-in temp test is selected explicitly.
+  const binary = path.join(
+    tempDir,
+    process.platform === "win32" ? "skymobi-pay-server.exe" : "skymobi-pay-server",
+  );
   const source = path.resolve("tools/pay-server/skymobi-pay-server.go");
   let child: PayServerProcess | undefined;
 
