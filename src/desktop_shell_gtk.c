@@ -28,6 +28,12 @@ static GtkWidget *g_embed_area;
 static GtkWidget *g_recent_menu;
 static int g_has_menubar;
 static int g_embedded; /* 1 = XReparent 嵌入,0 = 贴顶工具条 */
+static GtkWidget *g_edit_dlg;
+static GtkWidget *g_edit_entry;
+static int g_edit_done;
+static int g_edit_ok;
+static char g_edit_text[1024];
+void desktop_shell_gtk_edit_close(void);
 static int g_bar_h = 28;
 #ifdef GDK_WINDOWING_X11
 static Display *g_x11_dpy;
@@ -209,6 +215,7 @@ int desktop_shell_gtk_init(struct SDL_Window *window, int w, int h) {
 }
 
 void desktop_shell_gtk_shutdown(void) {
+    desktop_shell_gtk_edit_close();
     if (g_gtk_win) {
         gtk_widget_destroy(g_gtk_win);
         g_gtk_win = NULL;
@@ -230,7 +237,7 @@ void desktop_shell_gtk_idle(void) {
 }
 
 int desktop_shell_gtk_needs_idle(void) {
-    return g_has_menubar;
+    return g_has_menubar || g_edit_dlg != NULL;
 }
 
 int desktop_shell_gtk_has_menubar(void) {
@@ -620,6 +627,72 @@ int desktop_shell_gtk_dns_editor(char *map, size_t n) {
     desktop_shell_gtk_idle();
     g_object_unref(store);
     return desktop_dns_serialize(rules, count, map, n);
+}
+
+static void on_edit_response(GtkDialog *dialog, gint response, gpointer user) {
+    (void)user;
+    if (response == GTK_RESPONSE_OK && g_edit_entry) {
+        const char *t = gtk_entry_get_text(GTK_ENTRY(g_edit_entry));
+        copy_str(g_edit_text, sizeof(g_edit_text), t ? t : "");
+        g_edit_ok = 1;
+    } else {
+        g_edit_ok = 0;
+        g_edit_text[0] = '\0';
+    }
+    g_edit_done = 1;
+    gtk_widget_hide(GTK_WIDGET(dialog));
+    desktop_shell_wake();
+}
+
+int desktop_shell_gtk_edit_open(const char *title, const char *text, int type, int max_size) {
+    GtkWidget *content;
+    desktop_shell_gtk_edit_close();
+    g_edit_done = 0;
+    g_edit_ok = 0;
+    g_edit_text[0] = '\0';
+    g_edit_dlg = gtk_dialog_new_with_buttons(title && title[0] ? title : "编辑",
+                                             dialog_parent(),
+                                             GTK_DIALOG_DESTROY_WITH_PARENT,
+                                             "确定", GTK_RESPONSE_OK,
+                                             "取消", GTK_RESPONSE_CANCEL,
+                                             NULL);
+    gtk_window_set_default_size(GTK_WINDOW(g_edit_dlg), 420, 140);
+    gtk_window_set_modal(GTK_WINDOW(g_edit_dlg), FALSE);
+    content = gtk_dialog_get_content_area(GTK_DIALOG(g_edit_dlg));
+    g_edit_entry = gtk_entry_new();
+    gtk_entry_set_activates_default(GTK_ENTRY(g_edit_entry), TRUE);
+    if (max_size > 0) gtk_entry_set_max_length(GTK_ENTRY(g_edit_entry), max_size);
+    if (type == 2) gtk_entry_set_visibility(GTK_ENTRY(g_edit_entry), FALSE);
+    if (type == 1) gtk_entry_set_input_purpose(GTK_ENTRY(g_edit_entry), GTK_INPUT_PURPOSE_DIGITS);
+    gtk_entry_set_text(GTK_ENTRY(g_edit_entry), text ? text : "");
+    gtk_container_set_border_width(GTK_CONTAINER(content), 12);
+    gtk_box_pack_start(GTK_BOX(content), g_edit_entry, TRUE, TRUE, 8);
+    gtk_dialog_set_default_response(GTK_DIALOG(g_edit_dlg), GTK_RESPONSE_OK);
+    g_signal_connect(g_edit_dlg, "response", G_CALLBACK(on_edit_response), NULL);
+    gtk_widget_show_all(g_edit_dlg);
+    gtk_widget_grab_focus(g_edit_entry);
+    return 0;
+}
+
+void desktop_shell_gtk_edit_close(void) {
+    if (g_edit_dlg) {
+        gtk_widget_destroy(g_edit_dlg);
+        g_edit_dlg = NULL;
+        g_edit_entry = NULL;
+    }
+    g_edit_done = 0;
+}
+
+int desktop_shell_gtk_edit_poll(int *ok, char *out, size_t out_n) {
+    if (!g_edit_done) return 0;
+    if (ok) *ok = g_edit_ok;
+    if (out && out_n) copy_str(out, out_n, g_edit_text);
+    desktop_shell_gtk_edit_close();
+    return 1;
+}
+
+int desktop_shell_gtk_edit_active(void) {
+    return g_edit_dlg != NULL;
 }
 
 int desktop_shell_gtk_pick_sf2(char *out, size_t n) {

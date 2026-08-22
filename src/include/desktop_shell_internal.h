@@ -39,6 +39,7 @@ extern "C" {
 #endif
 
 void desktop_shell_queue_cmd(int cmd);
+void desktop_shell_wake(void);
 int desktop_shell_recent_count(void);
 const char *desktop_shell_recent_at(int index);
 const char *desktop_shell_last_ext(void);
@@ -60,6 +61,9 @@ int desktop_shell_cocoa_prompt(const char *title, const char *label,
                                int list_only);
 int desktop_shell_cocoa_dns_editor(char *map, size_t n);
 int desktop_shell_cocoa_pick_sf2(char *out, size_t n);
+int desktop_shell_cocoa_edit_open(const char *title, const char *text, int type, int max_size);
+void desktop_shell_cocoa_edit_close(void);
+int desktop_shell_cocoa_edit_poll(int *ok, char *out, size_t out_n);
 #endif
 
 #ifdef SKYENGINE_HAS_GTK
@@ -84,6 +88,10 @@ int desktop_shell_gtk_prompt(const char *title, const char *label,
                              int list_only);
 int desktop_shell_gtk_dns_editor(char *map, size_t n);
 int desktop_shell_gtk_pick_sf2(char *out, size_t n);
+int desktop_shell_gtk_edit_open(const char *title, const char *text, int type, int max_size);
+void desktop_shell_gtk_edit_close(void);
+int desktop_shell_gtk_edit_poll(int *ok, char *out, size_t out_n);
+int desktop_shell_gtk_edit_active(void);
 #endif
 
 #ifdef __cplusplus

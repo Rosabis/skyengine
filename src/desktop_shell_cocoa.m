@@ -427,6 +427,106 @@ int desktop_shell_cocoa_dns_editor(char *map, size_t n) {
     return rc;
 }
 
+@interface SkyEngineEditPanel : NSObject
+@property (strong) NSWindow *window;
+@property (strong) NSTextField *field;
+@property int done;
+@property int ok;
+@property (strong) NSString *text;
+- (void)ok:(id)sender;
+- (void)cancel:(id)sender;
+@end
+
+@implementation SkyEngineEditPanel
+- (void)ok:(id)sender {
+    (void)sender;
+    self.text = [[self.field stringValue] copy];
+    self.ok = 1;
+    self.done = 1;
+    [self.window orderOut:nil];
+    desktop_shell_wake();
+}
+- (void)cancel:(id)sender {
+    (void)sender;
+    self.ok = 0;
+    self.done = 1;
+    [self.window orderOut:nil];
+    desktop_shell_wake();
+}
+@end
+
+static SkyEngineEditPanel *g_edit_panel;
+
+int desktop_shell_cocoa_edit_open(const char *title, const char *text, int type, int max_size) {
+    @autoreleasepool {
+        desktop_shell_cocoa_edit_close();
+        SkyEngineEditPanel *p = [[SkyEngineEditPanel alloc] init];
+        NSRect frame = NSMakeRect(0, 0, 420, 120);
+        NSWindow *win = [[NSWindow alloc] initWithContentRect:frame
+                                                    styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable)
+                                                      backing:NSBackingStoreBuffered
+                                                        defer:NO];
+        [win setTitle:ns_utf8(title && title[0] ? title : "编辑")];
+        [win center];
+        NSTextField *field = type == 2
+            ? [[NSSecureTextField alloc] initWithFrame:NSMakeRect(16, 52, 388, 24)]
+            : [[NSTextField alloc] initWithFrame:NSMakeRect(16, 52, 388, 24)];
+        [field setStringValue:ns_utf8(text ? text : "")];
+        if (max_size > 0) {
+            /* NSTextField 没有字符上限 API;提交时由 saveEditText 裁剪。 */
+            (void)max_size;
+        }
+        NSButton *ok = [[NSButton alloc] initWithFrame:NSMakeRect(220, 12, 90, 28)];
+        [ok setTitle:@"确定"];
+        [ok setBezelStyle:NSRoundedBezelStyle];
+        [ok setTarget:p];
+        [ok setAction:@selector(ok:)];
+        [ok setKeyEquivalent:@"\r"];
+        NSButton *cancel = [[NSButton alloc] initWithFrame:NSMakeRect(314, 12, 90, 28)];
+        [cancel setTitle:@"取消"];
+        [cancel setBezelStyle:NSRoundedBezelStyle];
+        [cancel setTarget:p];
+        [cancel setAction:@selector(cancel:)];
+        [cancel setKeyEquivalent:@"\033"];
+        [[win contentView] addSubview:field];
+        [[win contentView] addSubview:ok];
+        [[win contentView] addSubview:cancel];
+        p.window = win;
+        p.field = field;
+        p.done = 0;
+        p.ok = 0;
+        g_edit_panel = p;
+        [[NSNotificationCenter defaultCenter] addObserverForName:NSWindowWillCloseNotification
+                                                          object:win
+                                                           queue:nil
+                                                      usingBlock:^(NSNotification *note) {
+            (void)note;
+            if (p.done) return;
+            p.ok = 0;
+            p.done = 1;
+            desktop_shell_wake();
+        }];
+        [win makeKeyAndOrderFront:nil];
+        [win makeFirstResponder:field];
+    }
+    return 0;
+}
+
+void desktop_shell_cocoa_edit_close(void) {
+    @autoreleasepool {
+        if (g_edit_panel.window) [g_edit_panel.window orderOut:nil];
+        g_edit_panel = nil;
+    }
+}
+
+int desktop_shell_cocoa_edit_poll(int *ok, char *out, size_t n) {
+    if (!g_edit_panel || !g_edit_panel.done) return 0;
+    if (ok) *ok = g_edit_panel.ok;
+    if (out && n) copy_utf8(g_edit_panel.text, out, n);
+    desktop_shell_cocoa_edit_close();
+    return 1;
+}
+
 int desktop_shell_cocoa_pick_sf2(char *out, size_t n) {
     __block int rc = -1;
     void (^run)(void) = ^{

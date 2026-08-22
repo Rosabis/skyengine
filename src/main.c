@@ -819,7 +819,11 @@ int32_t editCreate(const char *title, const char *text, int32_t type, int32_t ma
     edit_cursor = (int)strlen(edit_buf);
     edit_scroll = 0;
     edit_nav_lock = false;
-    edit_open_win(title);
+    /* 交互桌面用系统输入框(Win32/GTK/Cocoa);E2E 不弹窗,走 Ctrl+V 提交。
+     * 不能在这里 gtk_dialog_run/GetMessage 阻塞,否则 E2E 的 KEY 回执发不出去。 */
+    if (desktop_shell_edit_open(title ? title : "", text ? text : "", type, max_size) != 0) {
+        if (desktop_shell_enabled()) edit_open_win(title);
+    }
 #else
     if (SDL_SetClipboardText(text ? text : "") == 0) {
         SDL_Log("编辑内容已复制到剪贴板，按ctrl+v输入内容，按ctrl+z取消");
@@ -837,6 +841,7 @@ int32 editRelease(int32 edit) {
     android_stop_edit();
 #elif !defined(__EMSCRIPTEN__)
     edit_confirm = edit_cancel = false;
+    desktop_shell_edit_close();
     edit_close_win();
 #endif
     if (holdEditText != NULL) {
@@ -1294,6 +1299,14 @@ void loop(void) {
                         isLoop = false;
                         break;
                     }
+                    if (isEditMode) {
+                        int ok = 0;
+                        char buf[1024];
+                        if (desktop_shell_edit_poll(&ok, buf, sizeof(buf))) {
+                            if (ok) saveEditText(buf);
+                            event(MR_DIALOG_EVENT, ok ? 0 : 1, 0);
+                        }
+                    }
                     continue;
                 }
                 isLoop = false;
@@ -1363,6 +1376,17 @@ void loop(void) {
             }
             if (isEditMode) {
 #ifndef __EMSCRIPTEN__
+#if !defined(__ANDROID__)
+                {
+                    int ok = 0;
+                    char buf[1024];
+                    if (desktop_shell_edit_poll(&ok, buf, sizeof(buf))) {
+                        if (ok) saveEditText(buf);
+                        event(MR_DIALOG_EVENT, ok ? 0 : 1, 0);
+                        continue;
+                    }
+                }
+#endif
                 if (edit_handle_event(&ev)) {
                     if (edit_confirm) {
                         edit_confirm = false;

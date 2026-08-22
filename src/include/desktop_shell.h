@@ -40,4 +40,11 @@ void desktop_shell_refresh(void);
 int desktop_shell_needs_idle(void);
 void desktop_shell_idle(void);
 
+/* 非阻塞原生输入框,替代 SDL 自绘 8x8 点阵窗口。成功返回 0。
+ * E2E/dummy 不打开窗口,由 Ctrl+V/Z 路径提交。 */
+int desktop_shell_edit_open(const char *title, const char *text, int type, int max_size);
+void desktop_shell_edit_close(void);
+/* 1=用户已确定/取消,*ok 非 0 为确定;0=仍在编辑或未打开原生框。 */
+int desktop_shell_edit_poll(int *ok, char *out, size_t out_n);
+
 #endif

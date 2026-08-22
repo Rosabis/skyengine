@@ -78,6 +78,15 @@ static void copy_str(char *dst, size_t dst_sz, const char *src) {
 
 static void trim_inplace(char *s);
 
+void desktop_shell_wake(void) {
+    SDL_Event ev;
+    if (g_shell_event == 0 || g_shell_event == (Uint32)-1) return;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = g_shell_event;
+    ev.user.code = 0;
+    SDL_PushEvent(&ev);
+}
+
 void desktop_shell_queue_cmd(int cmd) {
     SDL_Event ev;
     if (!g_enabled || cmd == CMD_NONE) return;
@@ -552,6 +561,7 @@ static int win_pick_dir(char *out, size_t out_sz) {
 #define DLG_PROMPT 2
 #define DLG_DNS 3
 #define DLG_DNS_PAIR 4
+#define DLG_EDIT 5
 #define IDC_DNS_LIST 300
 #define IDC_DNS_ADD 301
 #define IDC_DNS_DEL 302
@@ -598,6 +608,17 @@ typedef struct {
     char to_utf8[DESKTOP_DNS_HOST_MAX];
 } DnsPairDlg;
 
+typedef struct {
+    int kind;
+    int result; /* 0 编辑中,1 确定,-1 取消 */
+    HWND hwnd;
+    HWND edit;
+    char text_utf8[1024];
+} NativeEditDlg;
+
+static NativeEditDlg g_edit_dlg;
+static void win_edit_close(void);
+
 static HWND add_label(HWND parent, const wchar_t *text, int x, int y, int w, int h) {
     HWND hwnd = CreateWindowW(L"STATIC", text, WS_CHILD | WS_VISIBLE,
                               x, y, w, h, parent, NULL, GetModuleHandleW(NULL), NULL);
@@ -635,9 +656,17 @@ static void dlg_finish(HWND hwnd, int result) {
         DnsPairDlg *pair = (DnsPairDlg *)any;
         dlg_capture_window_text(pair->from, pair->from_utf8, sizeof(pair->from_utf8));
         dlg_capture_window_text(pair->to, pair->to_utf8, sizeof(pair->to_utf8));
+    } else if (any->kind == DLG_EDIT) {
+        NativeEditDlg *ed = (NativeEditDlg *)any;
+        if (result == 1) {
+            dlg_capture_window_text(ed->edit, ed->text_utf8, sizeof(ed->text_utf8));
+        }
+        ed->hwnd = NULL;
+        ed->edit = NULL;
     }
     any->result = result;
     DestroyWindow(hwnd);
+    if (any->kind == DLG_EDIT) desktop_shell_wake();
 }
 
 static void dns_fill_listbox(DnsDlg *dns) {
@@ -1032,6 +1061,74 @@ static int win_dns_editor(char *map, size_t map_n) {
         return MR_SUCCESS;
     }
     return MR_FAILED;
+}
+
+static int win_edit_open(const char *title, const char *text, int type, int max_size) {
+    RECT pr;
+    HWND ok, cancel;
+    wchar_t *wtitle;
+    wchar_t *wtext;
+    DWORD estyle;
+    int x = 80, y = 80;
+    win_edit_close();
+    memset(&g_edit_dlg, 0, sizeof(g_edit_dlg));
+    g_edit_dlg.kind = DLG_EDIT;
+    if (g_hwnd && GetWindowRect(g_hwnd, &pr)) {
+        x = pr.left + 40;
+        y = pr.top + 40;
+    }
+    wtitle = utf8_to_wide(title && title[0] ? title : "编辑");
+    g_edit_dlg.hwnd = CreateWindowExW(WS_EX_DLGMODALFRAME, L"SkyEngineDlg",
+                                      wtitle ? wtitle : L"编辑",
+                                      WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE,
+                                      x, y, 480, 220, g_hwnd, NULL,
+                                      GetModuleHandleW(NULL), NULL);
+    free(wtitle);
+    if (!g_edit_dlg.hwnd) return -1;
+    SetWindowLongPtrW(g_edit_dlg.hwnd, GWLP_USERDATA, (LONG_PTR)&g_edit_dlg);
+    estyle = WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_AUTOVSCROLL |
+             ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL | WS_BORDER;
+    if (type == 2) estyle |= ES_PASSWORD; /* MR_EDIT_PASSWORD */
+    if (type == 1) estyle |= ES_NUMBER;   /* MR_EDIT_NUMERIC */
+    g_edit_dlg.edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                                      estyle, 16, 16, 432, 120, g_edit_dlg.hwnd,
+                                      (HMENU)200, GetModuleHandleW(NULL), NULL);
+    ok = CreateWindowW(L"BUTTON", L"确定",
+                       WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+                       248, 148, 90, 28, g_edit_dlg.hwnd, (HMENU)IDOK,
+                       GetModuleHandleW(NULL), NULL);
+    cancel = CreateWindowW(L"BUTTON", L"取消",
+                           WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                           348, 148, 90, 28, g_edit_dlg.hwnd, (HMENU)IDCANCEL,
+                           GetModuleHandleW(NULL), NULL);
+    apply_font(g_edit_dlg.edit);
+    apply_font(ok);
+    apply_font(cancel);
+    if (max_size > 0) SendMessageW(g_edit_dlg.edit, EM_LIMITTEXT, (WPARAM)max_size, 0);
+    wtext = utf8_to_wide(text ? text : "");
+    if (wtext) {
+        SetWindowTextW(g_edit_dlg.edit, wtext);
+        free(wtext);
+    }
+    SetFocus(g_edit_dlg.edit);
+    return 0;
+}
+
+static void win_edit_close(void) {
+    if (g_edit_dlg.hwnd) {
+        DestroyWindow(g_edit_dlg.hwnd);
+        g_edit_dlg.hwnd = NULL;
+        g_edit_dlg.edit = NULL;
+    }
+}
+
+static int win_edit_poll(int *ok, char *out, size_t out_n) {
+    if (g_edit_dlg.kind != DLG_EDIT || g_edit_dlg.result == 0) return 0;
+    if (ok) *ok = g_edit_dlg.result == 1;
+    if (out && out_n) copy_str(out, out_n, g_edit_dlg.text_utf8);
+    g_edit_dlg.kind = 0;
+    g_edit_dlg.result = 0;
+    return 1;
 }
 
 static int win_pick_sf2(char *out, size_t out_sz) {
@@ -1894,6 +1991,7 @@ void desktop_shell_shutdown(void) {
     if (!g_enabled) return;
     save_ui_config();
 #ifdef _WIN32
+    win_edit_close();
     if (g_hwnd && g_sdl_wndproc) {
         SetWindowLongPtrW(g_hwnd, GWLP_WNDPROC, (LONG_PTR)g_sdl_wndproc);
         g_sdl_wndproc = NULL;
@@ -2010,5 +2108,47 @@ int desktop_shell_needs_idle(void) {
 void desktop_shell_idle(void) {
 #ifdef SKYENGINE_HAS_GTK
     desktop_shell_gtk_idle();
+#endif
+}
+
+int desktop_shell_edit_open(const char *title, const char *text, int type, int max_size) {
+    if (!g_enabled) return -1;
+#ifdef _WIN32
+    return win_edit_open(title, text, type, max_size);
+#elif defined(__APPLE__)
+    return desktop_shell_cocoa_edit_open(title, text, type, max_size);
+#elif defined(SKYENGINE_HAS_GTK)
+    return desktop_shell_gtk_edit_open(title, text, type, max_size);
+#else
+    (void)title;
+    (void)text;
+    (void)type;
+    (void)max_size;
+    return -1;
+#endif
+}
+
+void desktop_shell_edit_close(void) {
+#ifdef _WIN32
+    win_edit_close();
+#elif defined(__APPLE__)
+    desktop_shell_cocoa_edit_close();
+#elif defined(SKYENGINE_HAS_GTK)
+    desktop_shell_gtk_edit_close();
+#endif
+}
+
+int desktop_shell_edit_poll(int *ok, char *out, size_t out_n) {
+#ifdef _WIN32
+    return win_edit_poll(ok, out, out_n);
+#elif defined(__APPLE__)
+    return desktop_shell_cocoa_edit_poll(ok, out, out_n);
+#elif defined(SKYENGINE_HAS_GTK)
+    return desktop_shell_gtk_edit_poll(ok, out, out_n);
+#else
+    (void)ok;
+    (void)out;
+    (void)out_n;
+    return 0;
 #endif
 }
