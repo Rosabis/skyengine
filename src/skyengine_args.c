@@ -241,6 +241,8 @@ void skyengine_args_print_usage(const char *program) {
     printf("  --device-date DATE  Set handset date (YYYY-MM-DD, or host; default: 2011-01-01)\n");
     printf("  --work-dir DIR      Set working directory (default: executable directory)\n");
     printf("  --dns-map MAP       Resolve original domains using fake domains\n");
+    printf("  --sf2 PATH          SoundFont (.sf2) for MIDI playback via TinySoundFont\n");
+    printf("                      (omit to keep built-in waveform synthesis)\n");
     printf("\n");
     printf("Environment variables:\n");
     printf("  SKYENGINE_SCREEN_WIDTH   Screen width  (overridden by --screen)\n");
@@ -249,6 +251,7 @@ void skyengine_args_print_usage(const char *program) {
     printf("  SKYENGINE_DEVICE_DATE    Handset date (overridden by --device-date)\n");
     printf("  SKYENGINE_WORK_DIR       Working directory (overridden by --work-dir)\n");
     printf("  SKYENGINE_DNS_MAP        Domain map, e.g. old.example->new.example\n");
+    printf("  SKYENGINE_SF2            SoundFont path (overridden by --sf2)\n");
     printf("  SKYENGINE_PPM_PATH       PPM screen dump path for SIGUSR1/verification\n");
     printf("  SKYENGINE_E2E_SOCKET     Local E2E endpoint (Unix socket or Windows named pipe)\n");
     printf("\n");
@@ -369,7 +372,7 @@ static int parse_positional_args(int argc, char *argv[], const char **mrp_arg,
                                  const char **ext_arg, const char **entry_arg,
                                  const char **screen_arg, const char **work_dir_arg,
                                  const char **dns_map_arg, const char **memory_arg,
-                                 const char **device_date_arg) {
+                                 const char **device_date_arg, const char **sf2_arg) {
     int positional = 0;
     int after_dashdash = 0;
     *mrp_arg = NULL;
@@ -380,6 +383,7 @@ static int parse_positional_args(int argc, char *argv[], const char **mrp_arg,
     *dns_map_arg = NULL;
     *memory_arg = NULL;
     *device_date_arg = NULL;
+    *sf2_arg = NULL;
 
     for (int i = 1; i < argc; i++) {
         const char *arg = argv[i];
@@ -427,6 +431,14 @@ static int parse_positional_args(int argc, char *argv[], const char **mrp_arg,
             *work_dir_arg = argv[++i];
             continue;
         }
+        if (!after_dashdash && strcmp(arg, "--sf2") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "skyengine: --sf2 requires an argument (path to a .sf2 SoundFont)\n");
+                return MR_FAILED;
+            }
+            *sf2_arg = argv[++i];
+            continue;
+        }
         if (!after_dashdash && arg[0] == '-') {
             fprintf(stderr, "skyengine: unknown option: %s\n", arg);
             skyengine_args_print_usage(argv[0]);
@@ -458,13 +470,14 @@ int skyengine_args_parse(int argc, char *argv[], SkyEngineArgs *out) {
     const char *dns_map_arg = NULL;
     const char *memory_arg = NULL;
     const char *device_date_arg = NULL;
+    const char *sf2_arg = NULL;
 
     *out = skyengine_args_default();
     skyengine_args_set_default_dirs(out, (argc > 0) ? argv[0] : NULL);
 
     if (parse_positional_args(argc, argv, &mrp_arg, &ext_arg, &entry_arg,
                               &screen_arg, &work_dir_arg, &dns_map_arg,
-                              &memory_arg, &device_date_arg) != MR_SUCCESS) {
+                              &memory_arg, &device_date_arg, &sf2_arg) != MR_SUCCESS) {
         return MR_FAILED;
     }
 
@@ -573,6 +586,18 @@ int skyengine_args_parse(int argc, char *argv[], SkyEngineArgs *out) {
         const char *env_dns_map = getenv("SKYENGINE_DNS_MAP");
         if (env_dns_map) {
             snprintf(out->dns_map, sizeof(out->dns_map), "%s", env_dns_map);
+        }
+    }
+
+    /* SF2 SoundFont: CLI --sf2 > environment variable > disabled */
+    {
+        const char *sf2 = sf2_arg;
+        if (!sf2) {
+            const char *env_sf2 = getenv("SKYENGINE_SF2");
+            if (env_sf2 && *env_sf2) sf2 = env_sf2;
+        }
+        if (sf2 && *sf2) {
+            snprintf(out->sf2_path, sizeof(out->sf2_path), "%s", sf2);
         }
     }
 

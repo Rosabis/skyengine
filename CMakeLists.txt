@@ -238,6 +238,7 @@ set(SKYENGINE_CORE_SOURCES
 
 set(SKYENGINE_PLATFORM_SDL_SOURCES
   ./src/main.c
+  ./src/log.c
   ./src/e2e_control.c
   ./src/keyboard_input.c
 )
@@ -341,6 +342,7 @@ add_executable(skyengine
   ./src/runtime_native_mythroad.c
   ${SKYENGINE_ARM_EXT_SOURCES}
   ${SKYENGINE_MYTHROAD_SOURCES}
+  ./third_party/tsf/tsf.c
 )
 target_compile_definitions(skyengine PRIVATE VMRP_SDL_AUDIO TARGET_MOD MTK_MOD MR_PLAT_DRAWTEXT DSM_FULL TRUST_BINARIES)
 target_include_directories(skyengine PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/unicorn/include)
@@ -478,6 +480,7 @@ if(EMCC)
     ./src/runtime_native_mythroad.c
     ${SKYENGINE_ARM_EXT_SOURCES}
     ${SKYENGINE_MYTHROAD_SOURCES}
+    ./third_party/tsf/tsf.c
   )
   # 将相对路径转为绝对路径
   set(SKYENGINE_WASM_ABS_SOURCES "")
@@ -527,6 +530,7 @@ if(SKYENGINE_BUILD_SHARED)
     ./src/runtime_native_mythroad.c
     ${SKYENGINE_ARM_EXT_SOURCES}
     ${SKYENGINE_MYTHROAD_SOURCES}
+    ./third_party/tsf/tsf.c
   )
   target_compile_definitions(skyengine-shared PRIVATE TARGET_MOD MTK_MOD MR_PLAT_DRAWTEXT DSM_FULL TRUST_BINARIES)
   target_include_directories(skyengine-shared PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/unicorn/include)

@@ -23,6 +23,8 @@
     <string name="label_model">型号</string>
     <string name="label_width">宽度</string>
     <string name="label_height">高度</string>
+    <string name="label_sf2">SF2 音色库路径</string>
+    <string name="sf2_hint">留空使用内置波形合成；填文件路径(相对 filesDir 或绝对)则用 TinySoundFont</string>
     <string name="device_saved">已保存，正在重启</string>
     <string name="device_invalid">分辨率无效，请填 50–800</string>
     <string name="about_text">vmrp Android\n基于 SDL2 + Unicorn 2 的 MRP 模拟器。\n导入的游戏放在应用内部 mythroad 目录。</string>

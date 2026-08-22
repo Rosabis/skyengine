@@ -30,6 +30,9 @@ typedef struct SkyEngineArgs {
     char ext_name[256];
     char entry[256];
     char dns_map[SKYENGINE_DNS_MAP_LIMIT];
+    /* 非空时使用 TinySoundFont 渲染 MIDI(SF2 音色库路径)；
+     * 为空则回退到内置波形合成。仅桌面端经 --sf2/环境变量注入。 */
+    char sf2_path[PATH_MAX];
 } SkyEngineArgs;
 
 SkyEngineArgs skyengine_args_default(void);

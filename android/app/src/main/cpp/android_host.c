@@ -96,6 +96,10 @@ void android_load_config(const char *path) {
              * 仅读入并告警,避免行为不一致;如需再引入请在 src/include 增加
              * 对应配置字段后再接入。 */
             fprintf(stderr, "[android_host] config key '%s' no longer supported in new API, ignored\n", key);
+        } else if (strcmp(key, "sf2") == 0) {
+            /* SF2 音色库路径:非空时原生 MIDI 用 TinySoundFont 渲染,为空则
+             * 回退到内置波形合成。路径相对内部存储 filesDir,或为绝对路径。 */
+            snprintf(skyengine_config.sf2_path, sizeof(skyengine_config.sf2_path), "%s", val);
         }
     }
     fclose(fp);

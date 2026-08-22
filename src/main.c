@@ -20,6 +20,7 @@
 #include "./include/native_text_widget.h"
 #include "./include/skyengine.h"
 #include "./include/memory.h"
+#include "./include/log.h"
 
 #ifdef _MSC_VER
 #include <SDL.h>
@@ -1502,6 +1503,17 @@ int main(int argc, char *args[]) {
         return -1;
     }
 
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    /* 桌面版运行日志:生成 log.txt 并把 stderr 诊断一并落盘。
+     * Android 走 logcat、Emscripten 无落盘,均不启用。 */
+    skyengine_log_init();
+    atexit(skyengine_log_shutdown);
+    skyengine_log_msg("[main] work_dir='%s' mrp='%s' ext='%s' screen=%dx%d\n",
+                       skyengine_args.work_dir, skyengine_args.mrp_path,
+                       skyengine_args.ext_name,
+                       skyengine_args.screen_width, skyengine_args.screen_height);
+#endif
+
 #ifdef __x86_64__
     printf("__x86_64__\n");
 #elif __i386__
@@ -1542,6 +1554,13 @@ int main(int argc, char *args[]) {
      * 同步一次;startVmrp() 内部的赋值保持不变(共享库入口依赖它)。 */
     skyengine_config.screen_width = skyengine_args.screen_width;
     skyengine_config.screen_height = skyengine_args.screen_height;
+
+    /* SF2 音色库:桌面端 --sf2/环境变量已解析进 args,同步到引擎共享配置,
+     * native_dsm_funcs 播放 MIDI 时据此决定用 TinySoundFont 还是波形合成。 */
+    if (skyengine_args.sf2_path[0]) {
+        snprintf(skyengine_config.sf2_path, sizeof(skyengine_config.sf2_path),
+                 "%s", skyengine_args.sf2_path);
+    }
 
 #if defined(__ANDROID__)
     /* vmrp.cfg 覆盖 CLI 分辨率，写 skyengine_config.screen_*。放在上面同步
@@ -1584,13 +1603,22 @@ int main(int argc, char *args[]) {
     e2e_hooks.motion_input = e2e_motion_input_hook;
     e2eControl = e2e_control_create(e2eEventType, &e2e_hooks);
 
+    #if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    skyengine_log_msg("[main] startEngine() begin\n");
+#endif
     if (startEngine(&skyengine_args) != MR_SUCCESS) {
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+        skyengine_log_msg("[main] startEngine FAILED (see log.txt for engine diagnostics)\n");
+#endif
         e2e_control_destroy(e2eControl);
         e2eControl = NULL;
         SDL_DestroyWindow(window);
         SDL_Quit();
         return -1;
     }
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    skyengine_log_msg("[main] startEngine OK\n");
+#endif
     if (skyengine_is_exited()) {
         stopEngine();
         e2e_control_destroy(e2eControl);

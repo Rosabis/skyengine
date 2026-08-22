@@ -40,6 +40,7 @@ public class VmrpActivity extends SDLActivity {
     private static final String KEY_MODEL = "model";
     private static final String KEY_WIDTH = "width";
     private static final String KEY_HEIGHT = "height";
+    private static final String KEY_SF2 = "sf2";
     private static final String DEF_IMEI = "864086040622841";
     private static final String DEF_IMSI = "460019707327302";
     private static final String DEF_MANUF = "vmrp";
@@ -393,6 +394,9 @@ public class VmrpActivity extends SDLActivity {
                 Integer.toString(sp.getInt(KEY_WIDTH, DEF_WIDTH)), InputType.TYPE_CLASS_NUMBER, 3);
         final EditText height = addSettingField(form, getString(R.string.label_height),
                 Integer.toString(sp.getInt(KEY_HEIGHT, DEF_HEIGHT)), InputType.TYPE_CLASS_NUMBER, 3);
+        final EditText sf2 = addSettingField(form, getString(R.string.label_sf2),
+                sp.getString(KEY_SF2, ""), InputType.TYPE_CLASS_TEXT, 512);
+        sf2.setHint(R.string.sf2_hint);
         ScrollView scroll = new ScrollView(this);
         scroll.addView(form);
         new AlertDialog.Builder(this)
@@ -419,6 +423,7 @@ public class VmrpActivity extends SDLActivity {
                             .putString(KEY_MODEL, model.getText().toString().trim())
                             .putInt(KEY_WIDTH, nw)
                             .putInt(KEY_HEIGHT, nh)
+                            .putString(KEY_SF2, sf2.getText().toString().trim())
                             .apply();
                     writeConfigFile();
                     Toast.makeText(this, R.string.device_saved, Toast.LENGTH_SHORT).show();
@@ -440,6 +445,7 @@ public class VmrpActivity extends SDLActivity {
             w.write("model=" + sp.getString(KEY_MODEL, DEF_MODEL) + "\n");
             w.write("width=" + sp.getInt(KEY_WIDTH, DEF_WIDTH) + "\n");
             w.write("height=" + sp.getInt(KEY_HEIGHT, DEF_HEIGHT) + "\n");
+            w.write("sf2=" + sp.getString(KEY_SF2, "") + "\n");
         } catch (IOException ignored) {
         }
     }

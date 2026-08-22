@@ -131,7 +131,11 @@ endforeach()
 foreach(src ${SKYENGINE_MYTHROAD_SOURCES})
     list(APPEND _SKYENGINE_MYTHROAD_ABS "${VMRP_ROOT}/${src}")
 endforeach()
-target_sources(main PRIVATE ${_SKYENGINE_AEX_ABS} ${_SKYENGINE_MYTHROAD_ABS})
+target_sources(main PRIVATE
+    ${_SKYENGINE_AEX_ABS}
+    ${_SKYENGINE_MYTHROAD_ABS}
+    "${VMRP_ROOT}/third_party/tsf/tsf.c"
+)
 
 target_include_directories(main PRIVATE
     "${VMRP_ROOT}/src/include"

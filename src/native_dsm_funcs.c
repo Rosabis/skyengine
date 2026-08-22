@@ -48,6 +48,10 @@
 #define MINIMP3_ONLY_MP3
 #include "../third_party/minimp3/minimp3.h"
 
+/* TinySoundFont(单头库, 实现编译单元在 third_party/tsf/tsf.c)。
+ * 用户配置了 SF2 音色库时用它渲染 MIDI,未配置则回退到下方内置波形合成。 */
+#include "../third_party/tsf/tsf.h"
+
 static void *native_mem_base;
 static uint32 native_mem_len;
 static uint64_t native_uptime_base;
@@ -117,6 +121,8 @@ typedef struct {
     float midi_volume[16];
     float midi_pan[16];
     MidiVoice midi_voices[48];
+    tsf *midi_synth;      /* TinySoundFont 实例;非 NULL 时 MIDI 走 SF2 渲染 */
+    int midi_synth_tried; /* 是否已尝试加载 SF2(避免每次都重试) */
     NativeAudioChannelVoice *channel_voices;
     uint32 channel_voice_count;
     uint32 channel_voice_capacity;
@@ -347,6 +353,28 @@ static void midi_apply_event(NativeAudioState *s, const MidiEvent *e) {
     }
     uint8 status = e->status & 0xf0;
     uint8 channel = e->status & 0x0f;
+    if (s->midi_synth) {
+        if (status == 0x80 || (status == 0x90 && e->b == 0)) {
+            tsf_channel_note_off(s->midi_synth, channel, e->a);
+        } else if (status == 0x90) {
+            float vel = s->midi_volume[channel] * ((float)e->b / 127.0f);
+            if (vel > 1.0f) vel = 1.0f;
+            tsf_channel_note_on(s->midi_synth, channel, e->a, vel);
+        } else if (status == 0xb0) {
+            /* 音量/声像等 CC 交给 TSF 通道;同时记录内部状态供循环重置恢复默认 */
+            if (e->a == 7) {
+                s->midi_volume[channel] = (float)e->b / 127.0f;
+            } else if (e->a == 10) {
+                s->midi_pan[channel] = ((float)e->b - 64.0f) / 64.0f;
+            }
+            tsf_channel_midi_control(s->midi_synth, channel, e->a, e->b);
+        } else if (status == 0xc0) {
+            s->midi_program[channel] = e->a;
+            tsf_channel_set_presetnumber(s->midi_synth, channel, e->a,
+                                         (channel == MIDI_DRUM_CHANNEL) ? 1 : 0);
+        }
+        return;
+    }
     if (status == 0x80 || (status == 0x90 && e->b == 0)) {
         midi_note_off(s, channel, e->a);
     } else if (status == 0x90) {
@@ -371,6 +399,13 @@ static void midi_reset_playback(NativeAudioState *s) {
         s->midi_program[i] = 0;
         s->midi_volume[i] = 1.0f;
         s->midi_pan[i] = 0.0f;
+        if (s->midi_synth) {
+            tsf_channel_note_off_all(s->midi_synth, i);
+            tsf_channel_set_volume(s->midi_synth, i, 1.0f);
+            tsf_channel_set_pan(s->midi_synth, i, 0.5f);
+            tsf_channel_set_presetnumber(s->midi_synth, i, 0,
+                                         (i == MIDI_DRUM_CHANNEL) ? 1 : 0);
+        }
     }
 }
 
@@ -381,6 +416,43 @@ static int16_t audio_float_to_s16(float sample) {
 }
 
 static void midi_render(NativeAudioState *s, int16_t *stream, int frames) {
+    /* TinySoundFont 渲染:SF2 已加载时按 tick 边界分批渲染,确保事件在对应
+     * tick 落位,再由 TSF 一次性生成该 batch 的交织立体声样本。 */
+    if (s->midi_synth) {
+        int produced = 0;
+        while (produced < frames) {
+            while (s->midi_event_pos < s->midi_event_count &&
+                   s->midi_events[s->midi_event_pos].tick <= s->midi_tick) {
+                midi_apply_event(s, &s->midi_events[s->midi_event_pos++]);
+            }
+
+            uint32 until_tick = s->midi_samples_per_tick - s->midi_sample_in_tick;
+            int block = (int)until_tick;
+            int remaining = frames - produced;
+            if (block > remaining) block = remaining;
+            if (block < 1) block = 1;
+
+            tsf_render_short(s->midi_synth,
+                             stream + produced * AUDIO_CHANNELS, block, 0);
+
+            s->midi_sample_in_tick += (uint32)block;
+            produced += block;
+            while (s->midi_sample_in_tick >= s->midi_samples_per_tick) {
+                s->midi_sample_in_tick -= s->midi_samples_per_tick;
+                s->midi_tick++;
+                if (s->midi_tick > s->midi_loop_ticks) {
+                    if (s->loop) {
+                        midi_reset_playback(s);
+                    } else {
+                        s->source = AUDIO_SOURCE_NONE;
+                        break;
+                    }
+                }
+            }
+        }
+        return;
+    }
+
     for (int i = 0; i < frames; i++) {
         while (s->midi_event_pos < s->midi_event_count &&
                s->midi_events[s->midi_event_pos].tick <= s->midi_tick) {
@@ -1264,10 +1336,41 @@ static int native_audio_parse_midi(NativeAudioState *s, const uint8 *data, uint3
     return MR_SUCCESS;
 }
 
+/* 按全局配置懒加载 SF2 音色库。配置为空或加载失败时保持 midi_synth 为空,
+ * 播放自然回退到内置波形合成;仅尝试一次,避免每次播放都重读文件。 */
+static void native_audio_load_synth_if_needed(void) {
+    if (native_audio.midi_synth_tried) {
+        return;
+    }
+    native_audio.midi_synth_tried = 1;
+    if (!skyengine_config.sf2_path[0]) {
+        return;
+    }
+    tsf *f = tsf_load_filename(skyengine_config.sf2_path);
+    if (!f) {
+        fprintf(stderr, "native_audio: failed to load SF2 '%s', using waveform synth\n",
+                skyengine_config.sf2_path);
+        return;
+    }
+    tsf_set_output(f, TSF_STEREO_INTERLEAVED, AUDIO_SAMPLE_RATE, 0.0f);
+    tsf_set_max_voices(f, 64);
+    /* 初始化为 0 号预设(piano),与实际音色/鼓组在遇到 program change 或
+     * 音符事件前保持合理默认;midi_reset_playback 与 midi_apply_event 会在
+     * 进入循环时按通道补齐设置。 */
+    for (int c = 0; c < 16; c++) {
+        tsf_channel_set_volume(f, c, 1.0f);
+        tsf_channel_set_pan(f, c, 0.5f);
+        tsf_channel_set_presetnumber(f, c, 0, (c == MIDI_DRUM_CHANNEL) ? 1 : 0);
+    }
+    printf("native_audio: SF2 '%s' loaded (TinySoundFont)\n", skyengine_config.sf2_path);
+    native_audio.midi_synth = f;
+}
+
 static int native_audio_play_midi(const void *data, uint32 dataLen, int32 loop) {
     if (native_audio_start_output() != MR_SUCCESS) {
         return MR_FAILED;
     }
+    native_audio_load_synth_if_needed();
     native_audio_lock();
     native_audio_clear_legacy_locked(&native_audio);
     int ret = native_audio_parse_midi(&native_audio, (const uint8 *)data, dataLen);

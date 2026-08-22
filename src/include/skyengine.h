@@ -23,6 +23,9 @@ typedef struct SkyEngineConfig {
     int device_month;
     int device_day;
     char work_dir[PATH_MAX];
+    /* 全局 MIDI 渲染开关:非空时用 TinySoundFont 播放 SF2 音色库,为空走内置
+     * 波形合成。桌面由 --sf2/环境变量注入,Android 由 vmrp.cfg 的 sf2= 键读取。 */
+    char sf2_path[PATH_MAX];
 } SkyEngineConfig;
 
 /* 应用可见内存(字节),memory_mb 为 0 时取默认值 */
