@@ -1510,6 +1510,12 @@ int main(int argc, char *args[]) {
 
 #if defined(__ANDROID__)
     android_host_init();
+    /* android_host_init 已把 cwd 切到内部存储(filesDir),运行固件按相对路径
+     * 访问。但 skyengine_args_parse 经 readlink("/proc/self/exe") 把 work_dir
+     * 解析成了 native 库目录(不是内部存储);若不覆写,startEngine→
+     * apply_config_paths 会把它 chdir 回去,导致 "mythroad/dsm_gm.mrp" 找不到、
+     * 启动即闪退。这里清空 work_dir,令 apply_config_paths 回退到 "."(= 内部存储)。 */
+    skyengine_args.work_dir[0] = '\0';
 #endif
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_AUDIO) < 0) {
