@@ -306,10 +306,20 @@ int format_arm(ArmExtModule *m, char *dst, size_t dst_size, const char *fmt, uns
         if (*p == '%') { dst[out++] = '%'; continue; }
         char spec[32];
         size_t si = 0;
+        int is_ll = 0;
         spec[si++] = '%';
         while (*p && strchr("-+ #0", *p) && si + 1 < sizeof(spec)) spec[si++] = *p++;
         while (*p && isdigit((unsigned char)*p) && si + 1 < sizeof(spec)) spec[si++] = *p++;
+        /* 与 mythroad/printf.c 一致:l 后再跟 l 是 long long。只吃一个 l 时
+         * "%lld" 把第二个 l 当未知转换符输出 "l",后面的 d 当普通字符,屏幕
+         * 变成 "ld"(点阵字体很像 "1d")。白跑分 v1.1.5 的 "综合: %lld" 因此
+         * 没有总分,同屏 "累加: %ld" 等单 l 格式仍正常。验证:综合应显示
+         * 64 位十进制整数而不是 "ld"。 */
         if (*p == 'l' && si + 1 < sizeof(spec)) spec[si++] = *p++;
+        if (*p == 'l' && si + 1 < sizeof(spec)) {
+            spec[si++] = *p++;
+            is_ll = 1;
+        }
         if (!*p) break;
         spec[si++] = *p;
         spec[si] = '\0';
@@ -328,8 +338,21 @@ int format_arm(ArmExtModule *m, char *dst, size_t dst_size, const char *fmt, uns
                 snprintf(tmp, sizeof(tmp), "0x%X", av);
             } break;
             case 'd': case 'i': case 'u': case 'x': case 'X': case 'o': {
-                uint32_t av = arg_read(m, ai++);
-                snprintf(tmp, sizeof(tmp), spec, av);
+                if (is_ll) {
+                    /* AAPCS: 8 字节实参走偶奇寄存器对(或 8 字节对齐的栈槽)。 */
+                    if (ai & 1u) ai++;
+                    uint32_t lo = arg_read(m, ai++);
+                    uint32_t hi = arg_read(m, ai++);
+                    uint64_t uv = (uint64_t)lo | ((uint64_t)hi << 32);
+                    if (*p == 'd' || *p == 'i') {
+                        snprintf(tmp, sizeof(tmp), spec, (int64_t)uv);
+                    } else {
+                        snprintf(tmp, sizeof(tmp), spec, uv);
+                    }
+                } else {
+                    uint32_t av = arg_read(m, ai++);
+                    snprintf(tmp, sizeof(tmp), spec, av);
+                }
             } break;
             default:
                 /* 原生 sprintf(src/mythroad/printf.c 的 default 分支)对
