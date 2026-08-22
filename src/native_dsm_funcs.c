@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdint.h>
 #ifdef _MSC_VER
 #ifndef WIN32_LEAN_AND_MEAN
@@ -61,6 +62,22 @@ static char readdir_buf[128];
 #define AUDIO_CHANNELS 2
 #define AUDIO_FRAMES 1024
 #define AUDIO_BYTES_PER_FRAME ((int)(sizeof(int16_t) * AUDIO_CHANNELS))
+
+/* 声音链路诊断日志。桌面端 skyengine_log_init 会把 stderr 重定向到 log.txt,
+ * 而 playSound 原有的 printf 只走 stdout(不落盘),导致无声问题时 log.txt 里
+ * 看不到任何声音判定。这里统一镜像一份到 stderr,让桌面版声音问题可直接从
+ * log.txt 定位;非桌面端(Android/Flutter)stderr 无副作用,维持原样即可。 */
+static void native_audio_log(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stdout, fmt, ap);
+    va_end(ap);
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fflush(stdout);
+    fflush(stderr);
+}
 #define MIDI_MAX_EVENTS 0x4000
 #define MIDI_MAX_TRACKS 32
 #define MIDI_DRUM_CHANNEL 9
@@ -684,7 +701,7 @@ static int native_audio_start_output(void) {
     want.userdata = &native_audio;
     native_audio.device = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
     if (!native_audio.device) {
-        printf("native_playSound: SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
+        native_audio_log("native_playSound: SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
         return MR_FAILED;
     }
     SDL_PauseAudioDevice(native_audio.device, 0);
@@ -1151,8 +1168,8 @@ static int native_audio_play_mp3(const void *data, uint32 dataLen, int32 loop) {
             hz = info.hz;
             channels = info.channels;
         } else if (info.hz != hz || info.channels != channels) {
-            printf("native_playSound: MP3 stream params changed (%dHz/%dch -> %dHz/%dch), truncated\n",
-                   hz, channels, info.hz, info.channels);
+            native_audio_log("native_playSound: MP3 stream params changed (%dHz/%dch -> %dHz/%dch), truncated\n",
+                             hz, channels, info.hz, info.channels);
             break;
         }
 
@@ -1176,7 +1193,7 @@ static int native_audio_play_mp3(const void *data, uint32 dataLen, int32 loop) {
 
     if (!pcm || pcm_samples == 0 || hz <= 0 || channels <= 0) {
         free(pcm);
-        printf("native_playSound: MP3 stream has no decodable frame len=%u\n", dataLen);
+        native_audio_log("native_playSound: MP3 stream has no decodable frame len=%u\n", dataLen);
         return MR_FAILED;
     }
 
@@ -1186,8 +1203,11 @@ static int native_audio_play_mp3(const void *data, uint32 dataLen, int32 loop) {
                                    loop, hz, channels, 16, 1, channels * (int)sizeof(int16_t));
     free(pcm); /* native_audio_set_pcm 内部拷贝转换, 源缓冲这里释放 */
     if (ret == MR_SUCCESS) {
-        printf("native_playSound: mp3 len=%u -> %uHz/%dch samples=%u loop=%d\n",
-               dataLen, (uint32)hz, channels, pcm_samples, (int)loop);
+        native_audio_log("native_playSound: mp3 len=%u -> %uHz/%dch samples=%u loop=%d\n",
+                         dataLen, (uint32)hz, channels, pcm_samples, (int)loop);
+    } else {
+        native_audio_log("native_playSound: mp3 decode/resample failed ret=%d len=%u\n",
+                         ret, dataLen);
     }
     return ret;
 }
@@ -1482,6 +1502,7 @@ static int32 native_playSound(int type, const void *data, uint32 dataLen, int32 
      * 实测为 MR_SOUND_MIDI + 标准 SMF；MR_SOUND_PCM 按 mrc_base.h 标注处理为
      * 8KHz/16bit/mono。Flutter 共享库通过 skyengine_api_audio_render_s16le()
      * 拉取统一的 44.1KHz/S16/stereo PCM，SDL 入口则用同一渲染器回调播放。 */
+    native_audio_log("native_playSound: type=%d len=%u loop=%d\n", type, dataLen, (int)loop);
     switch (type) {
         case NATIVE_SOUND_MIDI:
             return native_audio_play_midi(data, dataLen, loop);
