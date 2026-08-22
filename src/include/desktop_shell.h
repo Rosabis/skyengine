@@ -10,8 +10,11 @@ union SDL_Event;
  * 桌面宿主菜单(文件/设置),外观对齐 KEmulator 的窗口菜单栏。
  *
  * 必须画在 SDL 客户区之外:e2e PPM 截的是 SDL_GetWindowSurface(),若把
- * 菜单画进 240x320 画面会污染像素断言。因此 Windows 用 HMENU,Linux 用
- * F10/右键弹出系统对话框,两者都不改 framebuffer。
+ * 菜单画进 240x320 画面会污染像素断言。
+ *
+ * Windows:SetMenu 挂在 HWND 非客户区。
+ * macOS:NSMenu 挂在屏幕顶部菜单栏(系统标准位置)。
+ * Linux:X11/Wayland 没有窗口菜单 API;有 GTK3 时用 GtkMenuBar,否则 F10/右键。
  *
  * Android / Emscripten / E2E socket / dummy 视频驱动一律不启用。
  */
@@ -33,5 +36,8 @@ int desktop_shell_handle_event(const union SDL_Event *ev);
  * WM_COMMAND 里直接弹模态框重入 SDL 窗口过程。 */
 void desktop_shell_pump(void);
 void desktop_shell_refresh(void);
+/* GTK 菜单需要与 SDL 分时抽事件。needs_idle 为真时主循环改用短超时 WaitEvent。 */
+int desktop_shell_needs_idle(void);
+void desktop_shell_idle(void);
 
 #endif

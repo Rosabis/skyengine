@@ -385,6 +385,28 @@ endif()
 if(WIN32)
   # 桌面「文件/设置」菜单:GetOpenFileName/SHBrowseForFolder/COM 文件夹对话框。
   target_link_libraries(skyengine comdlg32 shell32 ole32 comctl32 uuid)
+elseif(APPLE)
+  # macOS 屏幕顶部 NSMenu。必须是 .m,不能跟 C 的 -Wstrict-prototypes 混编。
+  target_sources(skyengine PRIVATE ./src/desktop_shell_cocoa.m)
+  set_source_files_properties(./src/desktop_shell_cocoa.m PROPERTIES
+    COMPILE_FLAGS "-fobjc-arc")
+  target_link_libraries(skyengine "-framework Cocoa")
+elseif(UNIX)
+  # X11/Wayland 没有 SetMenu。GTK3 提供真正的 GtkMenuBar;没有 GTK 时退回 F10。
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(SKYENGINE_GTK3 QUIET gtk+-3.0)
+  endif()
+  if(SKYENGINE_GTK3_FOUND)
+    target_sources(skyengine PRIVATE ./src/desktop_shell_gtk.c)
+    target_compile_definitions(skyengine PRIVATE SKYENGINE_HAS_GTK)
+    target_include_directories(skyengine PRIVATE ${SKYENGINE_GTK3_INCLUDE_DIRS})
+    target_compile_options(skyengine PRIVATE ${SKYENGINE_GTK3_CFLAGS_OTHER})
+    target_link_libraries(skyengine ${SKYENGINE_GTK3_LDFLAGS})
+    message(STATUS "Desktop menu: GTK3 native menubar")
+  else()
+    message(STATUS "Desktop menu: F10/zenity fallback (install libgtk-3-dev for a native GTK menubar)")
+  endif()
 endif()
 
 if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)

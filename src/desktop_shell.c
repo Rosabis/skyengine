@@ -13,6 +13,7 @@
 #endif
 
 #include "./include/desktop_shell.h"
+#include "./include/desktop_shell_internal.h"
 #include "./include/file_lib.h"
 
 #include <ctype.h>
@@ -39,18 +40,7 @@
 #include <SDL2/SDL_syswm.h>
 #endif
 
-#define RECENT_MAX 8
-#define CMD_NONE 0
-#define CMD_OPEN 1001
-#define CMD_DSM_GM 1002
-#define CMD_ADVANCED 1003
-#define CMD_RESTART 1004
-#define CMD_RECENT_BASE 1100
-#define CMD_SCREEN 2001
-#define CMD_MEMORY 2002
-#define CMD_DATE 2003
-#define CMD_WORKDIR 2004
-#define CMD_DNS 2005
+#define RECENT_MAX DESKTOP_SHELL_RECENT_MAX
 
 static DesktopShellHost g_host;
 static int g_enabled;
@@ -60,6 +50,8 @@ static char g_recent[RECENT_MAX][PATH_MAX];
 static int g_recent_count;
 static char g_last_ext[256];
 static char g_last_entry[256];
+static Uint32 g_shell_event;
+static int g_native_menubar;
 
 #ifdef _WIN32
 static HWND g_hwnd;
@@ -68,7 +60,6 @@ static HMENU g_menu_recent;
 static ATOM g_dlg_atom;
 static int g_com_inited;
 static WNDPROC g_sdl_wndproc;
-static Uint32 g_shell_event;
 #endif
 
 static const char *env_nonempty(const char *a, const char *b) {
@@ -83,6 +74,43 @@ static void copy_str(char *dst, size_t dst_sz, const char *src) {
     if (!dst || dst_sz == 0) return;
     if (!src) src = "";
     snprintf(dst, dst_sz, "%s", src);
+}
+
+void desktop_shell_queue_cmd(int cmd) {
+    SDL_Event ev;
+    if (!g_enabled || cmd == CMD_NONE) return;
+    if (g_shell_event == 0 || g_shell_event == (Uint32)-1) {
+        g_pending_cmd = cmd;
+        if (cmd >= CMD_RECENT_BASE && cmd < CMD_RECENT_BASE + RECENT_MAX) {
+            g_pending_recent = cmd - CMD_RECENT_BASE;
+        }
+        return;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.type = g_shell_event;
+    ev.user.code = cmd;
+    SDL_PushEvent(&ev);
+}
+
+int desktop_shell_recent_count(void) {
+    return g_recent_count;
+}
+
+const char *desktop_shell_recent_at(int index) {
+    if (index < 0 || index >= g_recent_count) return NULL;
+    return g_recent[index];
+}
+
+const char *desktop_shell_last_ext(void) {
+    return g_last_ext[0] ? g_last_ext : "start.mr";
+}
+
+const char *desktop_shell_last_entry(void) {
+    return g_last_entry;
+}
+
+const char *desktop_shell_current_mrp(void) {
+    return g_host.args ? g_host.args->mrp_path : "";
 }
 
 static void trim_inplace(char *s) {
@@ -166,6 +194,14 @@ static int config_path(char *out, size_t out_sz) {
     _snwprintf(wpath, MAX_PATH, L"%s\\SkyEngine\\ui.cfg", wdir);
     wpath[MAX_PATH - 1] = L'\0';
     return wide_to_utf8(wpath, out, out_sz);
+#elif defined(__APPLE__)
+    const char *home = getenv("HOME");
+    char dir[PATH_MAX];
+    if (!home || !*home) return MR_FAILED;
+    snprintf(dir, sizeof(dir), "%s/Library/Application Support/SkyEngine", home);
+    if (mkdir(dir, 0755) != 0 && errno != EEXIST) return MR_FAILED;
+    snprintf(out, out_sz, "%s/ui.cfg", dir);
+    return MR_SUCCESS;
 #else
     const char *home = getenv("XDG_CONFIG_HOME");
     char dir[PATH_MAX];
@@ -780,7 +816,6 @@ static int win_create_menu(void) {
     AppendMenuW(g_menu_bar, MF_POPUP, (UINT_PTR)file_menu, L"文件");
     AppendMenuW(g_menu_bar, MF_POPUP, (UINT_PTR)settings_menu, L"设置");
     SetMenu(g_hwnd, g_menu_bar);
-    g_shell_event = SDL_RegisterEvents(1);
     g_sdl_wndproc = (WNDPROC)SetWindowLongPtrW(g_hwnd, GWLP_WNDPROC, (LONG_PTR)shell_sdl_wndproc);
     win_rebuild_recent();
     /* SetMenu 会吃掉客户区高度;把客户区拉回 --screen 尺寸,避免 PPM 被裁。 */
@@ -792,7 +827,7 @@ static int win_create_menu(void) {
 }
 #endif /* _WIN32 */
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
 static int posix_run(char *const argv[], char *out, size_t out_sz, int *exit_code) {
     int pipefd[2];
     pid_t pid;
@@ -996,15 +1031,77 @@ static int posix_menu_pick(void) {
     if (strcmp(choice, items[9]) == 0) return CMD_DNS;
     return CMD_NONE;
 }
-#endif /* !_WIN32 */
+#endif /* !WIN32 && !APPLE */
 
 static int pick_mrp(char *out, size_t out_sz) {
 #ifdef _WIN32
     return win_pick_mrp(out, out_sz);
+#elif defined(__APPLE__)
+    return desktop_shell_cocoa_pick_mrp(out, out_sz);
 #else
+#ifdef SKYENGINE_HAS_GTK
+    if (desktop_shell_gtk_pick_mrp(out, out_sz) == 0) return MR_SUCCESS;
+#endif
     return posix_pick_mrp(out, out_sz);
 #endif
 }
+
+static int pick_dir(char *out, size_t out_sz) {
+#ifdef _WIN32
+    return win_pick_dir(out, out_sz);
+#elif defined(__APPLE__)
+    return desktop_shell_cocoa_pick_dir(out, out_sz);
+#else
+#ifdef SKYENGINE_HAS_GTK
+    if (desktop_shell_gtk_pick_dir(out, out_sz) == 0) return MR_SUCCESS;
+#endif
+    return posix_pick_dir(out, out_sz);
+#endif
+}
+
+static int plat_advanced(char *mrp, size_t mrp_n, char *ext, size_t ext_n,
+                         char *entry, size_t entry_n) {
+#ifdef _WIN32
+    return win_advanced_dialog(mrp, mrp_n, ext, ext_n, entry, entry_n);
+#elif defined(__APPLE__)
+    return desktop_shell_cocoa_advanced(mrp, mrp_n, ext, ext_n, entry, entry_n);
+#else
+#ifdef SKYENGINE_HAS_GTK
+    if (desktop_shell_gtk_advanced(mrp, mrp_n, ext, ext_n, entry, entry_n) == 0) {
+        return MR_SUCCESS;
+    }
+#endif
+    return posix_advanced_dialog(mrp, mrp_n, ext, ext_n, entry, entry_n);
+#endif
+}
+
+#ifndef _WIN32
+static int plat_prompt(const char *title, const char *label, const char *initial,
+                       char *out, size_t n, int multiline, const char **choices,
+                       int nchoices, int list_only) {
+#if defined(__APPLE__)
+    return desktop_shell_cocoa_prompt(title, label, initial, out, n, multiline,
+                                      choices, nchoices, list_only);
+#else
+#ifdef SKYENGINE_HAS_GTK
+    if (desktop_shell_gtk_prompt(title, label, initial, out, n, multiline,
+                                 choices, nchoices, list_only) == 0) {
+        return MR_SUCCESS;
+    }
+#endif
+    (void)multiline;
+    (void)list_only;
+    if (choices && nchoices > 0) {
+        char *items[16];
+        int i;
+        if (nchoices > 16) nchoices = 16;
+        for (i = 0; i < nchoices; i++) items[i] = (char *)choices[i];
+        return posix_list(title, label, items, nchoices, out, n);
+    }
+    return posix_entry(title, label, initial, out, n);
+#endif
+}
+#endif
 
 static int run_open(void) {
     char path[PATH_MAX];
@@ -1041,7 +1138,7 @@ static int run_recent(int idx) {
 }
 
 static int run_recent_picker(void) {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
     char choice[PATH_MAX];
     char *items[RECENT_MAX];
     int i;
@@ -1072,17 +1169,10 @@ static int run_advanced(void) {
     mrp[0] = '\0';
     ext_choice[0] = '\0';
     entry_choice[0] = '\0';
-#ifdef _WIN32
-    if (win_advanced_dialog(mrp, sizeof(mrp), ext_choice, sizeof(ext_choice),
-                            entry_choice, sizeof(entry_choice)) != MR_SUCCESS) {
+    if (plat_advanced(mrp, sizeof(mrp), ext_choice, sizeof(ext_choice),
+                      entry_choice, sizeof(entry_choice)) != MR_SUCCESS) {
         return MR_FAILED;
     }
-#else
-    if (posix_advanced_dialog(mrp, sizeof(mrp), ext_choice, sizeof(ext_choice),
-                              entry_choice, sizeof(entry_choice)) != MR_SUCCESS) {
-        return MR_FAILED;
-    }
-#endif
     if (!mrp[0]) {
         shell_error("请选择要启动的 MRP 文件。");
         return MR_FAILED;
@@ -1122,8 +1212,8 @@ static int run_screen(void) {
         return MR_FAILED;
     }
 #else
-    if (posix_entry("设置屏幕分辨率", "屏幕分辨率，默认 240x320（格式 WxH）",
-                    cur, next, sizeof(next)) != MR_SUCCESS) {
+    if (plat_prompt("设置屏幕分辨率", "屏幕分辨率，默认 240x320（格式 WxH）",
+                    cur, next, sizeof(next), 0, NULL, 0, 0) != MR_SUCCESS) {
         return MR_FAILED;
     }
 #endif
@@ -1152,9 +1242,9 @@ static int run_memory(void) {
     }
 #else
     {
-        char *items[] = {"1M", "2M", "4M", "6M", "8M", "16M"};
-        if (posix_list("设置应用可见内存", "只接受 1M、2M、4M、6M、8M、16M",
-                       items, 6, next, sizeof(next)) != MR_SUCCESS) {
+        const char *items[] = {"1M", "2M", "4M", "6M", "8M", "16M"};
+        if (plat_prompt("设置应用可见内存", "只接受 1M、2M、4M、6M、8M、16M",
+                        cur, next, sizeof(next), 0, items, 6, 1) != MR_SUCCESS) {
             return MR_FAILED;
         }
     }
@@ -1178,8 +1268,8 @@ static int run_date(void) {
         return MR_FAILED;
     }
 #else
-    if (posix_entry("设置应用可见设备日期", "接受 YYYY-MM-DD 或 host；默认 2011-01-01",
-                    cur, next, sizeof(next)) != MR_SUCCESS) {
+    if (plat_prompt("设置应用可见设备日期", "接受 YYYY-MM-DD 或 host；默认 2011-01-01",
+                    cur, next, sizeof(next), 0, NULL, 0, 0) != MR_SUCCESS) {
         return MR_FAILED;
     }
 #endif
@@ -1202,7 +1292,7 @@ static int run_workdir(void) {
         return MR_FAILED;
     }
 #else
-    if (posix_pick_dir(next, sizeof(next)) != MR_SUCCESS) return MR_FAILED;
+    if (pick_dir(next, sizeof(next)) != MR_SUCCESS) return MR_FAILED;
 #endif
     if (skyengine_args_resolve_dir(next, resolved, sizeof(resolved)) != MR_SUCCESS) {
         shell_error("无效工作目录。");
@@ -1221,9 +1311,9 @@ static int run_dns(void) {
         return MR_FAILED;
     }
 #else
-    if (posix_entry("设置域名替换规则",
+    if (plat_prompt("设置域名替换规则",
                     "多条规则用逗号或分号分隔，映射符为 -> 或 =。留空表示不替换。",
-                    g_host.args->dns_map, next, sizeof(next)) != MR_SUCCESS) {
+                    g_host.args->dns_map, next, sizeof(next), 1, NULL, 0, 0) != MR_SUCCESS) {
         return MR_FAILED;
     }
 #endif
@@ -1298,6 +1388,8 @@ void desktop_shell_init(const DesktopShellHost *host) {
     copy_str(g_last_entry, sizeof(g_last_entry), host->args->entry);
     if (!g_enabled) return;
     load_ui_config(host->args);
+    g_shell_event = SDL_RegisterEvents(1);
+    g_native_menubar = 0;
 #ifdef _WIN32
     {
         HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -1307,9 +1399,18 @@ void desktop_shell_init(const DesktopShellHost *host) {
         g_enabled = 0;
         return;
     }
-#else
-    SDL_SetWindowTitle(host->window, "SkyEngine  [F10 或右键打开文件/设置]");
+    g_native_menubar = 1;
+#elif defined(__APPLE__)
+    if (desktop_shell_cocoa_init() == 0) g_native_menubar = 1;
+#elif defined(SKYENGINE_HAS_GTK)
+    if (desktop_shell_gtk_init(host->window, host->args->screen_width,
+                               host->args->screen_height) == 0) {
+        g_native_menubar = desktop_shell_gtk_has_menubar();
+    }
 #endif
+    if (!g_native_menubar) {
+        SDL_SetWindowTitle(host->window, "SkyEngine  [F10 或右键打开文件/设置]");
+    }
     desktop_shell_refresh();
 }
 
@@ -1332,13 +1433,17 @@ void desktop_shell_shutdown(void) {
         CoUninitialize();
         g_com_inited = 0;
     }
+#elif defined(__APPLE__)
+    desktop_shell_cocoa_shutdown();
+#elif defined(SKYENGINE_HAS_GTK)
+    desktop_shell_gtk_shutdown();
 #endif
+    g_native_menubar = 0;
     g_enabled = 0;
 }
 
 int desktop_shell_handle_event(const union SDL_Event *ev) {
     if (!g_enabled || !ev) return 0;
-#ifdef _WIN32
     if (g_shell_event != 0 && g_shell_event != (Uint32)-1 && ev->type == g_shell_event) {
         int cmd = ev->user.code;
         if (cmd == 0) return 1;
@@ -1348,20 +1453,25 @@ int desktop_shell_handle_event(const union SDL_Event *ev) {
         }
         return 1;
     }
-#else
-    if (ev->type == SDL_KEYDOWN && ev->key.keysym.sym == SDLK_F10 && !ev->key.repeat) {
-        g_pending_cmd = posix_menu_pick();
-        return 1;
-    }
-    if (ev->type == SDL_KEYUP && ev->key.keysym.sym == SDLK_F10) {
-        return 1;
-    }
-    if (ev->type == SDL_MOUSEBUTTONDOWN && ev->button.button == SDL_BUTTON_RIGHT) {
-        g_pending_cmd = posix_menu_pick();
-        return 1;
-    }
-    if (ev->type == SDL_MOUSEBUTTONUP && ev->button.button == SDL_BUTTON_RIGHT) {
-        return 1;
+#ifdef SKYENGINE_HAS_GTK
+    desktop_shell_gtk_handle_window_event(ev);
+#endif
+#if !defined(_WIN32) && !defined(__APPLE__)
+    if (!g_native_menubar) {
+        if (ev->type == SDL_KEYDOWN && ev->key.keysym.sym == SDLK_F10 && !ev->key.repeat) {
+            g_pending_cmd = posix_menu_pick();
+            return 1;
+        }
+        if (ev->type == SDL_KEYUP && ev->key.keysym.sym == SDLK_F10) {
+            return 1;
+        }
+        if (ev->type == SDL_MOUSEBUTTONDOWN && ev->button.button == SDL_BUTTON_RIGHT) {
+            g_pending_cmd = posix_menu_pick();
+            return 1;
+        }
+        if (ev->type == SDL_MOUSEBUTTONUP && ev->button.button == SDL_BUTTON_RIGHT) {
+            return 1;
+        }
     }
 #endif
     return 0;
@@ -1399,9 +1509,30 @@ void desktop_shell_refresh(void) {
         }
     }
     win_rebuild_recent();
+#elif defined(__APPLE__)
+    desktop_shell_cocoa_set_title(title);
+    desktop_shell_cocoa_refresh_recents();
+#elif defined(SKYENGINE_HAS_GTK)
+    desktop_shell_gtk_set_title(title);
+    desktop_shell_gtk_refresh_recents();
+    desktop_shell_gtk_sync_window();
 #else
     snprintf(title, sizeof(title), "SkyEngine - %s  [F10 或右键打开文件/设置]",
              name && *name ? name : "未载入");
     SDL_SetWindowTitle(g_host.window, title);
+#endif
+}
+
+int desktop_shell_needs_idle(void) {
+#ifdef SKYENGINE_HAS_GTK
+    return desktop_shell_gtk_needs_idle();
+#else
+    return 0;
+#endif
+}
+
+void desktop_shell_idle(void) {
+#ifdef SKYENGINE_HAS_GTK
+    desktop_shell_gtk_idle();
 #endif
 }

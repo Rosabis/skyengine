@@ -1274,10 +1274,34 @@ void loop(void) {
         while (SDL_PollEvent(&ev))
 #else
         /* mr_menuShow 只显示平台菜单并立即返回；主循环继续处理 SDL/E2E/
-         * timer，平台输入由 skyengine_runtime_event 的公共漏斗接管。 */
-        while (SDL_WaitEvent(&ev))
+         * timer，平台输入由 skyengine_runtime_event 的公共漏斗接管。
+         * GTK 菜单栏需要穿插 gtk_main_iteration,不能无限阻塞 WaitEvent。 */
+        for (;;)
 #endif
         {
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
+            int got_event;
+            desktop_shell_idle();
+            if (desktop_shell_needs_idle()) {
+                got_event = SDL_WaitEventTimeout(&ev, 16);
+            } else {
+                got_event = SDL_WaitEvent(&ev);
+            }
+            if (!got_event) {
+                /* WaitEventTimeout 超时返回 0,继续抽 GTK;WaitEvent 失败才退出。 */
+                if (desktop_shell_needs_idle()) {
+                    if (skyengine_is_exited()) {
+                        isLoop = false;
+                        break;
+                    }
+                    continue;
+                }
+                isLoop = false;
+                break;
+            }
+#elif !defined(__EMSCRIPTEN__)
+            if (!SDL_WaitEvent(&ev)) break;
+#endif
             if (skyengine_is_exited()) {
                 isLoop = false;
                 break;
