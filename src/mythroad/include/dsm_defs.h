@@ -106,6 +106,15 @@ typedef struct {
     /* 释放正在显示的同一 handle；隐藏菜单仍由 DSM 自己释放持久数据。 */
     int32 (*mr_menuRelease)(int32 handle);
 
+    /* FILE_LOAD 歌曲不进 Mythroad 堆,PLAY 后由宿主混音器持有 44.1kHz PCM。
+     * 时长/进度按该 PCM 换算;PAUSE 冻结位置而不是清轨。追加在函数区末尾,
+     * 不改变已有回调顺序;DSM 与宿主必须同步重编译。 */
+    int32 (*mr_getSoundDurationMs)(int type);
+    int32 (*mr_getSoundPositionMs)(int type);
+    int32 (*mr_setSoundPositionMs)(int type, int32 ms);
+    int32 (*mr_pauseSound)(int type);
+    int32 (*mr_resumeSound)(int type);
+
     // 变量放在最后
     int32 flags;  // 调整运行时的一些参数，目前只有调整文件系统路径名是否使用UTF8编码这一个功能
     int32 screen_width;

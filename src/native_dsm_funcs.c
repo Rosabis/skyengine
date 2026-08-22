@@ -143,6 +143,7 @@ typedef struct {
     NativeAudioChannelVoice *channel_voices;
     uint32 channel_voice_count;
     uint32 channel_voice_capacity;
+    int paused;
 } NativeAudioState;
 
 static NativeAudioState native_audio;
@@ -537,6 +538,7 @@ static void midi_render(NativeAudioState *s, int16_t *stream, int frames) {
 
 static void native_audio_clear_legacy_locked(NativeAudioState *s) {
     s->source = AUDIO_SOURCE_NONE;
+    s->paused = 0;
     free(s->pcm);
     s->pcm = NULL;
     s->pcm_len = 0;
@@ -646,6 +648,8 @@ static void native_audio_mix_channels_locked(NativeAudioState *s,
 static int native_audio_render_bytes(NativeAudioState *s, uint8 *stream, int len) {
     if (!stream || len <= 0) return 0;
     memset(stream, 0, (size_t)len);
+    /* Flutter 拉流路径没有 SDL_PauseAudioDevice;暂停时输出静音且不推进 pcm_pos。 */
+    if (s->paused) return 0;
 
     int frames = len / AUDIO_BYTES_PER_FRAME;
     if (frames <= 0) return 0;
@@ -726,7 +730,13 @@ static int native_audio_take_pcm(uint8 *pcm, uint32 pcm_len, int32 loop) {
     native_audio.pcm_pos = 0;
     native_audio.loop = loop ? 1 : 0;
     native_audio.source = AUDIO_SOURCE_PCM;
+    native_audio.paused = 0;
     native_audio_unlock();
+#if defined(VMRP_SDL_AUDIO)
+    if (native_audio.device) {
+        SDL_PauseAudioDevice(native_audio.device, 0);
+    }
+#endif
     return MR_SUCCESS;
 }
 
@@ -1131,8 +1141,8 @@ static int native_audio_play_wav(const void *data, uint32 dataLen, int32 loop) {
 }
 
 /* 用 minimp3 把 MR_SOUND_MP3 整段解码为宿主端 S16 PCM, 再走
- * native_audio_set_pcm 统一重采样到 44.1KHz/stereo。MRP 音效通常只有
- * 几秒(talkcat 音效 32KHz mono 约 1 秒), 全量解码的内存开销可以接受;
+ * native_audio_set_pcm 统一重采样到 44.1KHz/stereo。短音效(talkcat)与
+ * FILE_LOAD 歌曲(听听音阅,宿主 malloc 的数 MB 压缩流)都走这里;
  * 以首帧的采样率/声道数为准, 中途参数变化的畸形流按解码到该处截断处理,
  * 避免把不同采样率的帧硬拼进同一个 PCM 缓冲造成变调。 */
 static int native_audio_play_mp3(const void *data, uint32 dataLen, int32 loop) {
@@ -1530,6 +1540,87 @@ static int32 native_stopSound(int type) {
     native_audio_lock();
     native_audio_clear_legacy_locked(&native_audio);
     native_audio_unlock();
+#if defined(VMRP_SDL_AUDIO)
+    if (native_audio.device) {
+        SDL_PauseAudioDevice(native_audio.device, 0);
+    }
+#endif
+    return MR_SUCCESS;
+}
+
+static int32 native_audio_pcm_ms_locked(uint32 byte_pos) {
+    if (byte_pos == 0) return 0;
+    return (int32)(((uint64_t)byte_pos * 1000ull) /
+                   (uint64_t)(AUDIO_BYTES_PER_FRAME * AUDIO_SAMPLE_RATE));
+}
+
+static int32 native_getSoundDurationMs(int type) {
+    (void)type;
+    native_audio_lock();
+    int32 ms = 0;
+    if (native_audio.source == AUDIO_SOURCE_PCM) {
+        ms = native_audio_pcm_ms_locked(native_audio.pcm_len);
+    }
+    native_audio_unlock();
+    return ms;
+}
+
+static int32 native_getSoundPositionMs(int type) {
+    (void)type;
+    native_audio_lock();
+    int32 ms = 0;
+    if (native_audio.source == AUDIO_SOURCE_PCM) {
+        ms = native_audio_pcm_ms_locked(native_audio.pcm_pos);
+    }
+    native_audio_unlock();
+    return ms;
+}
+
+static int32 native_setSoundPositionMs(int type, int32 ms) {
+    (void)type;
+    if (ms < 0) ms = 0;
+    native_audio_lock();
+    if (native_audio.source != AUDIO_SOURCE_PCM || native_audio.pcm_len == 0) {
+        native_audio_unlock();
+        return MR_FAILED;
+    }
+    uint64_t frames = ((uint64_t)ms * (uint64_t)AUDIO_SAMPLE_RATE) / 1000ull;
+    uint64_t pos = frames * (uint64_t)AUDIO_BYTES_PER_FRAME;
+    if (pos > native_audio.pcm_len) pos = native_audio.pcm_len;
+    native_audio.pcm_pos = (uint32)pos;
+    native_audio_unlock();
+    return MR_SUCCESS;
+}
+
+static int32 native_pauseSound(int type) {
+    (void)type;
+    native_audio_lock();
+    native_audio.paused = 1;
+    native_audio_unlock();
+#if defined(VMRP_SDL_AUDIO)
+    if (native_audio.device) {
+        SDL_PauseAudioDevice(native_audio.device, 1);
+    }
+#endif
+    return MR_SUCCESS;
+}
+
+static int32 native_resumeSound(int type) {
+    (void)type;
+    native_audio_lock();
+    if (native_audio.source == AUDIO_SOURCE_NONE &&
+        native_audio.channel_voice_count == 0) {
+        native_audio.paused = 0;
+        native_audio_unlock();
+        return MR_FAILED;
+    }
+    native_audio.paused = 0;
+    native_audio_unlock();
+#if defined(VMRP_SDL_AUDIO)
+    if (native_audio.device) {
+        SDL_PauseAudioDevice(native_audio.device, 0);
+    }
+#endif
     return MR_SUCCESS;
 }
 
@@ -1670,6 +1761,11 @@ static DSM_REQUIRE_FUNCS native_funcs = {
     .mr_stopSoundChannel = native_stopSoundChannel,
     .mr_menuShow = native_menuShow,
     .mr_menuRelease = native_menuRelease,
+    .mr_getSoundDurationMs = native_getSoundDurationMs,
+    .mr_getSoundPositionMs = native_getSoundPositionMs,
+    .mr_setSoundPositionMs = native_setSoundPositionMs,
+    .mr_pauseSound = native_pauseSound,
+    .mr_resumeSound = native_resumeSound,
     .flags = NATIVE_DSM_FLAGS,
     .screen_width = 0,
     .screen_height = 0,

@@ -793,6 +793,47 @@ static int32 dsmSwitchPath(uint8 *input, int32 input_len, uint8 **output, int32 
     return MR_SUCCESS;
 }
 
+/* DSM 盘符路径(正斜杠 `C:/TTYY/a.mp3`)按 dsmSwitchPath 映射到宿主相对路径。
+ * 听听音阅 FILE_LOAD 会把 platEx(Y) 返回的 `c:/TTYY/` 拼进文件名;Windows 若把
+ * `C:/` 当 Win32 盘则去读真实 C:\TTYY,而 T 卡根是 cwd(`SetDsmWorkPath("./")`)。
+ * `C:\` 反斜杠仍是宿主绝对路径,不走本映射。 */
+static int dsm_map_guest_drive(const char *filename, char *out, uint32 out_len) {
+    char drive;
+    const char *rest;
+    const char *root;
+    if (!filename || !out || out_len < 2) return 0;
+    if (!filename[0] || filename[1] != ':' || filename[2] != '/') return 0;
+    drive = filename[0];
+    if (drive >= 'a' && drive <= 'z') drive = (char)(drive - ('a' - 'A'));
+    rest = filename + 3;
+    switch (drive) {
+        case 'A':
+            root = DSM_DRIVE_A;
+            break;
+        case 'B':
+            root = DSM_DRIVE_B;
+            break;
+        case 'X':
+            root = DSM_DRIVE_X;
+            break;
+        case 'Z':
+            root = MYTHROAD_PATH;
+            break;
+        case 'C':
+            /* dsmSwitchPath('C') 把 T 卡根设为 "./";其余子路径直接相对 cwd。 */
+            if (!rest[0]) {
+                snprintf_(out, out_len, "%s", "./");
+            } else {
+                snprintf_(out, out_len, "%s", rest);
+            }
+            return 1;
+        default:
+            return 0;
+    }
+    snprintf_(out, out_len, "%s%s", root, rest);
+    return 1;
+}
+
 static int isHostAbsolutePath(const char *filename) {
     if (!filename || !*filename) {
         return 0;
@@ -804,8 +845,10 @@ static int isHostAbsolutePath(const char *filename) {
     if (filename[0] == '\\') {
         return 1;
     }
+    /* 仅反斜杠盘符视为 Win32(`C:\Users\...`)。正斜杠 `C:/` 是 DSM T 卡,
+     * 由 dsm_map_guest_drive() 处理,避免听听音阅 FILE_LOAD 打到真实 C:\。 */
     if (((filename[0] >= 'A' && filename[0] <= 'Z') || (filename[0] >= 'a' && filename[0] <= 'z')) &&
-        filename[1] == ':' && (filename[2] == '/' || filename[2] == '\\')) {
+        filename[1] == ':' && filename[2] == '\\') {
         return 1;
     }
 #endif
@@ -902,7 +945,10 @@ static void dsm_fix_path_case(char *pathbuf) {
 #endif /* !USE_FINDDIR */
 
 char *get_filename(char *outputbuf, const char *filename) {
-    if (isHostAbsolutePath(filename) || isDsmRootPath(filename)) {
+    char mapped[DSM_MAX_FILE_LEN];
+    if (dsm_map_guest_drive(filename, mapped, sizeof(mapped))) {
+        sprintf_(outputbuf, "%s", mapped);
+    } else if (isHostAbsolutePath(filename) || isDsmRootPath(filename)) {
         sprintf_(outputbuf, "%s", filename);
     } else {
         sprintf_(outputbuf, "%s%s", dsmWorkPath, filename);
@@ -957,6 +1003,9 @@ typedef struct {
     uint8 *data;
     int32 len;
     int owns_data;
+    /* FILE_LOAD 的压缩流在宿主堆,不进 1MB LG_mem;真机媒体任务也不占
+     * Mythroad 堆。BUF_LOAD 仍是 guest 指针(owns_data=0,host_owned=0)。 */
+    int host_owned;
 } DsmMediaDevice;
 
 static DsmMediaDevice dsm_media_devices[ACI_AMR_WB_DEVICE + 1];
@@ -994,18 +1043,27 @@ static int32 dsm_media_to_sound_type(int device) {
 }
 
 static void dsm_media_release(DsmMediaDevice *media) {
-    if (media->owns_data && media->data) {
+    if (media->host_owned && media->data) {
+        free(media->data);
+    } else if (media->owns_data && media->data) {
         mr_free(media->data, (uint32)media->len);
     }
     media->data = NULL;
     media->len = 0;
     media->owns_data = FALSE;
+    media->host_owned = FALSE;
     media->status = MR_MEDIA_IDLE;
 }
 
 static void dsm_media_reset_all(void) {
-    /* dsm_init 在 Mythroad 堆重新初始化前调用；上一轮应用的 media/channel
-     * 缓冲跟随整块堆内存释放，这里只清状态，不能再对旧指针调用 mr_free。 */
+    /* VM 侧 BUF_LOAD/旧 FILE_LOAD 指针随 LG 堆一起失效,不能 mr_free。
+     * FILE_LOAD 改为宿主 malloc 后必须在这里释放,否则应用重启泄漏。 */
+    int i;
+    for (i = ACI_MIDI_DEVICE; i <= ACI_AMR_WB_DEVICE; i++) {
+        if (dsm_media_devices[i].host_owned && dsm_media_devices[i].data) {
+            free(dsm_media_devices[i].data);
+        }
+    }
     memset2(dsm_media_devices, 0, sizeof(dsm_media_devices));
     memset2(dsm_media_channels, 0, sizeof(dsm_media_channels));
 }
@@ -1147,34 +1205,55 @@ static int32 dsm_media_file_load(DsmMediaDevice *media, uint8 *input, int32 inpu
     }
 
     char fullpathname[DSM_MAX_FILE_LEN];
-    char *path = get_filename(fullpathname, (const char *)input);
+    char namebuf[DSM_MAX_FILE_LEN];
+    int32 n = input_len;
+    if (n >= DSM_MAX_FILE_LEN) n = DSM_MAX_FILE_LEN - 1;
+    memcpy2(namebuf, input, (uint32)n);
+    namebuf[n] = '\0';
+    char *path = get_filename(fullpathname, namebuf);
     int32 len = dsmInFuncs->getLen(path);
     if (len <= 0) {
         LOGW("MR_MEDIA_FILE_LOAD device=%d path='%s' len=%d", media->device, path, len);
+        fprintf(stderr, "MR_MEDIA_FILE_LOAD fail device=%d path='%s' len=%d\n",
+                media->device, path, len);
         return MR_FAILED;
     }
 
-    uint8 *data = mr_malloc((uint32)len);
+    /* 歌曲级 MP3 可达数 MB,LG 堆默认 1MB。真机 FILE_LOAD 只登记路径,
+     * 解码在媒体引擎;这里用宿主 malloc 保存压缩流再交给 mr_playSound。 */
+    uint8 *data = (uint8 *)malloc((size_t)len);
     if (!data) {
+        LOGW("MR_MEDIA_FILE_LOAD host malloc fail device=%d path='%s' len=%d",
+             media->device, path, len);
+        fprintf(stderr, "MR_MEDIA_FILE_LOAD host malloc fail path='%s' len=%d\n",
+                path, len);
         return MR_FAILED;
     }
     int32 f = dsmInFuncs->open(path, MR_FILE_RDONLY);
     if (f == 0) {
-        mr_free(data, (uint32)len);
+        free(data);
+        LOGW("MR_MEDIA_FILE_LOAD open fail path='%s'", path);
+        fprintf(stderr, "MR_MEDIA_FILE_LOAD open fail path='%s'\n", path);
         return MR_FAILED;
     }
     int32 got = dsmInFuncs->read(f, data, (uint32)len);
     dsmInFuncs->close(f);
     if (got != len) {
-        mr_free(data, (uint32)len);
+        free(data);
+        LOGW("MR_MEDIA_FILE_LOAD short read path='%s' got=%d want=%d", path, got, len);
+        fprintf(stderr, "MR_MEDIA_FILE_LOAD short read path='%s' got=%d want=%d\n",
+                path, got, len);
         return MR_FAILED;
     }
 
     dsm_media_release(media);
     media->data = data;
     media->len = len;
-    media->owns_data = TRUE;
+    media->owns_data = FALSE;
+    media->host_owned = TRUE;
     media->status = MR_MEDIA_LOADED;
+    fprintf(stderr, "MR_MEDIA_FILE_LOAD ok device=%d path='%s' len=%d\n",
+            media->device, path, len);
     return MR_SUCCESS;
 }
 
@@ -1186,12 +1265,15 @@ static int32 dsm_media_buf_load(DsmMediaDevice *media, uint8 *input, int32 input
     media->data = input;
     media->len = input_len;
     media->owns_data = FALSE;
+    media->host_owned = FALSE;
     media->status = MR_MEDIA_LOADED;
     return MR_SUCCESS;
 }
 
 static int32 dsm_media_play(DsmMediaDevice *media, uint8 *input, int32 input_len) {
     if (!media || !media->data || media->len <= 0) {
+        fprintf(stderr, "dsm_media_play fail no data device=%d\n",
+                media ? media->device : -1);
         return MR_FAILED;
     }
     T_DSM_MEDIA_PLAY play;
@@ -1207,6 +1289,9 @@ static int32 dsm_media_play(DsmMediaDevice *media, uint8 *input, int32 input_len
     int32 ret = mr_playSound(type, media->data, (uint32)media->len, play.loop);
     if (ret == MR_SUCCESS) {
         media->status = MR_MEDIA_PLAYING;
+    } else {
+        fprintf(stderr, "dsm_media_play mr_playSound fail device=%d type=%d len=%d ret=%d\n",
+                media->device, type, media->len, ret);
     }
     return ret;
 }
@@ -1234,11 +1319,24 @@ static int32 dsm_media_platEx(int32 cmd, int device, uint8 *input, int32 input_l
         case MR_MEDIA_PLAY_CUR_REQ:
             return dsm_media_play(media, input, input_len);
         case MR_MEDIA_PAUSE_REQ:
+            /* 暂停必须冻结混音位置。旧实现与 STOP 一样清轨,恢复只能从头播,
+             * 听听音阅进度条会停在 0。 */
+            dsmInFuncs->mr_pauseSound(dsm_media_to_sound_type(device));
+            media->status = MR_MEDIA_PAUSED;
+            return MR_SUCCESS;
         case MR_MEDIA_STOP_REQ:
             mr_stopSound(dsm_media_to_sound_type(device));
             media->status = MR_MEDIA_LOADED;
             return MR_SUCCESS;
         case MR_MEDIA_RESUME_REQ:
+            if (media->status == MR_MEDIA_PAUSED) {
+                if (dsmInFuncs->mr_resumeSound(dsm_media_to_sound_type(device)) ==
+                    MR_SUCCESS) {
+                    media->status = MR_MEDIA_PLAYING;
+                    return MR_SUCCESS;
+                }
+                return MR_FAILED;
+            }
             return dsm_media_play(media, input, input_len);
         case MR_MEDIA_CLOSE:
         case MR_MEDIA_FREE:
@@ -1252,13 +1350,28 @@ static int32 dsm_media_platEx(int32 cmd, int device, uint8 *input, int32 input_l
                 *output_len = sizeof(media->status);
             }
             return media->status;
-        case MR_MEDIA_SETPOS:
+        case MR_MEDIA_SETPOS: {
+            T_SET_PLAY_POS pos;
+            if (!input || input_len < (int32)sizeof(pos)) {
+                return MR_FAILED;
+            }
+            memcpy2(&pos, input, sizeof(pos));
+            /* T_SET_PLAY_POS.pos 单位是秒。 */
+            return dsmInFuncs->mr_setSoundPositionMs(dsm_media_to_sound_type(device),
+                                                     pos.pos * 1000);
+        }
         case MR_MEDIA_GETTIME:
         case MR_MEDIA_GET_TOTAL_TIME:
         case MR_MEDIA_GET_CURTIME:
         case MR_MEDIA_GET_CURTIME_MSEC: {
             static T_MEDIA_TIME media_time;
-            media_time.pos = 0;
+            int type = dsm_media_to_sound_type(device);
+            int32 ms = (cmd == MR_MEDIA_GET_TOTAL_TIME)
+                           ? dsmInFuncs->mr_getSoundDurationMs(type)
+                           : dsmInFuncs->mr_getSoundPositionMs(type);
+            /* GET_CURTIME_MSEC 是毫秒;GET_TOTAL_TIME/GET_CURTIME/GETTIME 是秒。
+             * 听听音阅 GET_TOTAL_TIME 得到 0 会把时长写成 360 秒。 */
+            media_time.pos = (cmd == MR_MEDIA_GET_CURTIME_MSEC) ? ms : (ms / 1000);
             if (output && output_len) {
                 *output = (uint8 *)&media_time;
                 *output_len = sizeof(media_time);
