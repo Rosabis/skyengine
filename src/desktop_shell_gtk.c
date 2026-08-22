@@ -1,14 +1,14 @@
-/* Linux 原生菜单栏。X11/Wayland 都没有 Win32 SetMenu 那种窗口菜单 API,
- * GTK 是 GNOME 系桌面的标准控件库。X11 下用 GtkSocket 把 SDL 窗口嵌进带
- * 菜单栏的 GTK 窗口(客户区仍是 --screen 尺寸);Wayland 下 GtkSocket 不可用,
- * 改把 GTK 菜单栏作为无边框工具窗口贴在 SDL 窗口顶上。
+/* Linux 原生菜单栏。X11/Wayland 没有 Win32 SetMenu。
+ * GtkSocket/XEmbed 要求子窗口实现 XEMBED,SDL 窗口没有,XFCE 上会嵌入失败、
+ * 看起来像「装了 GTK 仍无菜单」。X11 改为 XReparentWindow 把 SDL 窗口挂到
+ * GTK 菜单栏下面的 EventBox 里。Wayland 仍用贴顶工具条。
  * 菜单回调只 queue_cmd,不在 GTK 信号里重启引擎。 */
 #include "./include/desktop_shell_internal.h"
 
 #include <gtk/gtk.h>
 #ifdef GDK_WINDOWING_X11
+#include <X11/Xlib.h>
 #include <gdk/gdkx.h>
-#include <gtk/gtkx.h>
 #endif
 
 #ifdef _MSC_VER
@@ -24,11 +24,15 @@
 
 static SDL_Window *g_sdl;
 static GtkWidget *g_gtk_win;
-static GtkWidget *g_socket;
+static GtkWidget *g_embed_area;
 static GtkWidget *g_recent_menu;
 static int g_has_menubar;
-static int g_embedded; /* 1 = GtkSocket 嵌入,0 = 贴顶工具条 */
+static int g_embedded; /* 1 = XReparent 嵌入,0 = 贴顶工具条 */
 static int g_bar_h = 28;
+#ifdef GDK_WINDOWING_X11
+static Display *g_x11_dpy;
+static Window g_sdl_xid;
+#endif
 
 static void copy_str(char *dst, size_t n, const char *src) {
     if (!dst || n == 0) return;
@@ -95,30 +99,52 @@ static gboolean on_gtk_delete(GtkWidget *w, GdkEvent *e, gpointer data) {
 static int try_x11_embed(GtkWidget *bar, int w, int h) {
     SDL_SysWMinfo info;
     GtkWidget *vbox;
-    GtkWidget *socket;
-    Window xid;
+    GtkWidget *area;
+    GdkWindow *gdkwin;
+    Window parent_xid;
 
     SDL_VERSION(&info.version);
     if (!SDL_GetWindowWMInfo(g_sdl, &info) || info.subsystem != SDL_SYSWM_X11) {
+        fprintf(stderr, "[desktop_shell] GTK: SDL 不是 X11 窗口,无法嵌入\n");
         return -1;
     }
-    xid = info.info.x11.window;
 
+    /* EventBox 有自己的 X window,才能当 XReparent 的父窗口。
+     * GtkSocket 要 XEMBED,SDL 不实现该协议,Debian/XFCE 上会嵌入失败。 */
     g_gtk_win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(g_gtk_win), "SkyEngine");
     vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    socket = gtk_socket_new();
-    gtk_widget_set_size_request(socket, w, h);
+    area = gtk_event_box_new();
+    gtk_widget_set_size_request(area, w, h);
+    gtk_widget_set_hexpand(area, TRUE);
+    gtk_widget_set_vexpand(area, TRUE);
     gtk_box_pack_start(GTK_BOX(vbox), bar, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(vbox), socket, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(vbox), area, TRUE, TRUE, 0);
     gtk_container_add(GTK_CONTAINER(g_gtk_win), vbox);
     g_signal_connect(g_gtk_win, "delete-event", G_CALLBACK(on_gtk_delete), NULL);
     gtk_widget_show_all(g_gtk_win);
+    while (gtk_events_pending()) {
+        gtk_main_iteration_do(FALSE);
+    }
+    gdkwin = gtk_widget_get_window(area);
+    if (!gdkwin) {
+        fprintf(stderr, "[desktop_shell] GTK: EventBox 尚未 realize,放弃嵌入\n");
+        gtk_widget_destroy(g_gtk_win);
+        g_gtk_win = NULL;
+        return -1;
+    }
+    parent_xid = gdk_x11_window_get_xid(gdkwin);
+    g_x11_dpy = info.info.x11.display;
+    g_sdl_xid = info.info.x11.window;
     SDL_SetWindowBordered(g_sdl, SDL_FALSE);
-    gtk_socket_add_id(GTK_SOCKET(socket), xid);
-    g_socket = socket;
+    XReparentWindow(g_x11_dpy, g_sdl_xid, parent_xid, 0, 0);
+    XResizeWindow(g_x11_dpy, g_sdl_xid, (unsigned)w, (unsigned)h);
+    XMapWindow(g_x11_dpy, g_sdl_xid);
+    XSync(g_x11_dpy, False);
+    g_embed_area = area;
     g_embedded = 1;
     g_has_menubar = 1;
+    fprintf(stderr, "[desktop_shell] GTK menubar: X11 reparent %dx%d\n", w, h);
     return 0;
 }
 #endif
@@ -135,12 +161,13 @@ static void dock_bar(void) {
 }
 
 static int try_docked_bar(GtkWidget *bar, int w) {
+    int top = 0, left = 0, bottom = 0, right = 0;
+    (void)bottom;
+    (void)right;
     g_gtk_win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(g_gtk_win), "SkyEngine");
+    gtk_window_set_title(GTK_WINDOW(g_gtk_win), "SkyEngine 菜单");
     gtk_window_set_decorated(GTK_WINDOW(g_gtk_win), FALSE);
-    gtk_window_set_skip_taskbar_hint(GTK_WINDOW(g_gtk_win), TRUE);
-    gtk_window_set_skip_pager_hint(GTK_WINDOW(g_gtk_win), TRUE);
-    gtk_window_set_type_hint(GTK_WINDOW(g_gtk_win), GDK_WINDOW_TYPE_HINT_UTILITY);
+    gtk_window_set_keep_above(GTK_WINDOW(g_gtk_win), TRUE);
     gtk_window_set_resizable(GTK_WINDOW(g_gtk_win), FALSE);
     gtk_container_add(GTK_CONTAINER(g_gtk_win), bar);
     gtk_widget_set_size_request(g_gtk_win, w > 0 ? w : 240, g_bar_h);
@@ -148,7 +175,12 @@ static int try_docked_bar(GtkWidget *bar, int w) {
     gtk_widget_show_all(g_gtk_win);
     g_embedded = 0;
     g_has_menubar = 1;
+    SDL_GetWindowBordersSize(g_sdl, &top, &left, &bottom, &right);
+    (void)left;
+    (void)top;
     dock_bar();
+    fprintf(stderr, "[desktop_shell] GTK menubar: docked bar (driver=%s)\n",
+            SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "?");
     return 0;
 }
 
@@ -162,10 +194,11 @@ int desktop_shell_gtk_init(struct SDL_Window *window, int w, int h) {
     desktop_shell_gtk_refresh_recents();
 
     driver = SDL_GetCurrentVideoDriver();
+    fprintf(stderr, "[desktop_shell] GTK init, SDL driver='%s'\n",
+            driver ? driver : "(null)");
 #ifdef GDK_WINDOWING_X11
     if (driver && strcmp(driver, "x11") == 0) {
         if (try_x11_embed(bar, w, h) == 0) return 0;
-        /* 嵌入失败则 bar 可能已有 parent,重建一份贴顶菜单。 */
         bar = build_menubar();
         desktop_shell_gtk_refresh_recents();
     }
@@ -180,7 +213,11 @@ void desktop_shell_gtk_shutdown(void) {
         gtk_widget_destroy(g_gtk_win);
         g_gtk_win = NULL;
     }
-    g_socket = NULL;
+    g_embed_area = NULL;
+#ifdef GDK_WINDOWING_X11
+    g_x11_dpy = NULL;
+    g_sdl_xid = 0;
+#endif
     g_recent_menu = NULL;
     g_has_menubar = 0;
     g_sdl = NULL;
@@ -235,9 +272,15 @@ void desktop_shell_gtk_sync_window(void) {
     int w = 0, h = 0;
     if (!g_sdl) return;
     SDL_GetWindowSize(g_sdl, &w, &h);
-    if (g_embedded && g_socket) {
-        gtk_widget_set_size_request(g_socket, w, h);
+    if (g_embedded && g_embed_area) {
+        gtk_widget_set_size_request(g_embed_area, w, h);
         if (g_gtk_win) gtk_window_resize(GTK_WINDOW(g_gtk_win), w, h + g_bar_h);
+#ifdef GDK_WINDOWING_X11
+        if (g_x11_dpy && g_sdl_xid) {
+            XResizeWindow(g_x11_dpy, g_sdl_xid, (unsigned)w, (unsigned)h);
+            XSync(g_x11_dpy, False);
+        }
+#endif
     } else {
         dock_bar();
     }

@@ -31,6 +31,8 @@ typedef struct SkyEngineConfig {
     int compat_priority;
 } SkyEngineConfig;
 
+extern SkyEngineConfig skyengine_config;
+
 static inline int skyengine_compat_priority(void) {
     return skyengine_config.compat_priority ? 1 : 0;
 }
@@ -40,8 +42,6 @@ static inline uint32_t SKYENGINE_MEMORY_bytes(int memory_mb) {
     int mb = memory_mb > 0 ? memory_mb : DEFAULT_MEMORY_MB;
     return (uint32_t)mb * 1024u * 1024u;
 }
-
-extern SkyEngineConfig skyengine_config;
 
 /* 旋转后的显示尺寸(用户视角):真机 plat(101) 旋转后应用绘制转置画布,
  * LCD 控制器旋转扫描,用户横握手机所见即画布原样。模拟器展示层因此不做

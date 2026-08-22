@@ -76,6 +76,8 @@ static void copy_str(char *dst, size_t dst_sz, const char *src) {
     snprintf(dst, dst_sz, "%s", src);
 }
 
+static void trim_inplace(char *s);
+
 void desktop_shell_queue_cmd(int cmd) {
     SDL_Event ev;
     if (!g_enabled || cmd == CMD_NONE) return;
@@ -1875,6 +1877,12 @@ void desktop_shell_init(const DesktopShellHost *host) {
                                host->args->screen_height) == 0) {
         g_native_menubar = desktop_shell_gtk_has_menubar();
     }
+#else
+    fprintf(stderr,
+            "[desktop_shell] 本二进制未链接 GTK3。安装 libgtk-3-dev 后必须重新运行 cmake 再编译,只 apt 不会改已有 skyengine。\n");
+    fprintf(stdout,
+            "[desktop_shell] 未链接 GTK3,使用 F10/右键菜单。重新 cmake && 编译后才会出现原生菜单栏。\n");
+    fflush(stdout);
 #endif
     if (!g_native_menubar) {
         SDL_SetWindowTitle(host->window, "SkyEngine  [F10 或右键打开文件/设置]");
