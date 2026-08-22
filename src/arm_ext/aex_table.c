@@ -611,18 +611,21 @@ static void aex_t033(ArmExtModule *m, AexTableCtx *c) {
     uint32_t ret = MR_SUCCESS;
  {
             ret = mr_getTime();
-            /* 部分 ext 用忙等循环反复调 mr_getTime() 等待真实时间流逝（如
-             * 菜单切换动画、定时器主循环）。真机上 OS 抢占让时钟自然推进；
-             * 模拟器里需 usleep 让宿主时间走动。连续 200 次无其它 table 调
-             * 用即视为忙等，每轮 usleep 5ms；超 3 秒强制停止 ARM 执行，
-             * 让宿主侧定时器有机会触发再重新进入。 */
+            /* 部分 ext 用忙等循环反复调 mr_getTime() 等真实时间流逝（菜单
+             * 动画）。时钟是 CLOCK_MONOTONIC，Unicorn 空转时也会走，不必
+             * usleep 来“推动”时间。旧 fork 的 table[33] 就是直接返回。
+             * 白跑分 v1.1.5 的 1 秒吞吐测试也是“干活 + getTime”，累加/
+             * 运算/排序几乎不调其它 table，连续 200 次 getTime 后 usleep(5ms)
+             * 会把 1 秒配额睡掉，分数只剩约 200+1000/5*100≈2 万（累加实测
+             * 19494），而旧版同机约 64 万。usleep 还在 emu_start 里，SDL
+             * 主循环同样转不到。只保留：连续 getTime 超过 3 秒则停 ARM，
+             * 让宿主定时器有机会跑（真死循环才需要）。验证：白跑分累加应
+             * 回到与 old/ 同量级；菜单动画仍靠墙钟满等待时长。 */
             m->busy_wait_count++;
             if (m->busy_wait_count == 1) {
                 m->busy_wait_start_ms = ret;
             }
             if (m->busy_wait_count >= 200) {
-                usleep(5 * 1000);
-                m->busy_wait_count = 100;
                 uint32_t elapsed_ms = ret - m->busy_wait_start_ms;
                 if (elapsed_ms >= 3000) {
                     m->busy_wait_count = 0;
