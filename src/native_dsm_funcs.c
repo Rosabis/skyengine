@@ -1810,6 +1810,25 @@ void native_audio_stop(void) {
     native_audio_unlock();
 }
 
+void native_audio_set_sf2(const char *path) {
+    native_audio_lock();
+    if (native_audio.midi_synth) {
+        tsf_close(native_audio.midi_synth);
+        native_audio.midi_synth = NULL;
+    }
+    native_audio.midi_synth_tried = 0;
+    if (native_audio.source == AUDIO_SOURCE_MIDI) {
+        native_audio_clear_legacy_locked(&native_audio);
+    }
+    native_audio_unlock();
+    if (path && *path) {
+        snprintf(skyengine_config.sf2_path, sizeof(skyengine_config.sf2_path),
+                 "%s", path);
+    } else {
+        skyengine_config.sf2_path[0] = '\0';
+    }
+}
+
 void native_dsm_funcs_destroy(void) {
 #if defined(VMRP_SDL_AUDIO)
     if (native_audio.device) {
@@ -1819,6 +1838,11 @@ void native_dsm_funcs_destroy(void) {
 #endif
     native_audio_lock();
     native_audio_clear_all_locked(&native_audio);
+    if (native_audio.midi_synth) {
+        tsf_close(native_audio.midi_synth);
+        native_audio.midi_synth = NULL;
+    }
+    native_audio.midi_synth_tried = 0;
     native_audio_unlock();
 #ifdef __linux__
 #ifdef __x86_64__

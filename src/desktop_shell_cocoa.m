@@ -96,11 +96,13 @@ int desktop_shell_cocoa_init(void) {
 
         NSMenuItem *set_item = [[NSMenuItem alloc] initWithTitle:@"设置" action:nil keyEquivalent:@""];
         NSMenu *set_menu = [[NSMenu alloc] initWithTitle:@"设置"];
+        add_item(set_menu, "设置运行模式...", CMD_PROFILE, @"");
         add_item(set_menu, "设置屏幕分辨率...", CMD_SCREEN, @"");
         add_item(set_menu, "设置应用可见内存...", CMD_MEMORY, @"");
         add_item(set_menu, "设置应用可见设备日期...", CMD_DATE, @"");
         add_item(set_menu, "设置运行和 MRP 文件系统的工作目录...", CMD_WORKDIR, @"");
         add_item(set_menu, "设置域名替换规则...", CMD_DNS, @"");
+        add_item(set_menu, "选择 SoundFont (SF2)...", CMD_SF2, @"");
         [set_item setSubmenu:set_menu];
         [menubar insertItem:set_item atIndex:insert_at + 1];
         g_settings_item = set_item;
@@ -298,6 +300,145 @@ int desktop_shell_cocoa_prompt(const char *title, const char *label,
             else if (view) copy_utf8([[view textStorage] string], out, n);
             else copy_utf8([field stringValue], out, n);
             rc = 0;
+        }
+    };
+    if ([NSThread isMainThread]) run();
+    else dispatch_sync(dispatch_get_main_queue(), run);
+    return rc;
+}
+
+@interface SkyEngineDnsEditor : NSObject <NSTableViewDataSource>
+@property (strong) NSMutableArray<NSString *> *lines;
+@property (strong) NSTableView *table;
+- (void)reloadRules:(DesktopDnsRule *)rules count:(int)count;
+@end
+
+@implementation SkyEngineDnsEditor
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _lines = [NSMutableArray array];
+    }
+    return self;
+}
+- (void)reloadRules:(DesktopDnsRule *)rules count:(int)count {
+    int i;
+    [self.lines removeAllObjects];
+    for (i = 0; i < count; i++) {
+        char line[DESKTOP_DNS_HOST_MAX * 2 + 8];
+        desktop_dns_format(&rules[i], line, sizeof(line));
+        [self.lines addObject:ns_utf8(line)];
+    }
+    [self.table reloadData];
+}
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
+    (void)tableView;
+    return (NSInteger)self.lines.count;
+}
+- (id)tableView:(NSTableView *)tableView objectValueForTableColumn:(NSTableColumn *)column row:(NSInteger)row {
+    (void)tableView;
+    (void)column;
+    if (row < 0 || row >= (NSInteger)self.lines.count) return @"";
+    return self.lines[(NSUInteger)row];
+}
+@end
+
+int desktop_shell_cocoa_dns_editor(char *map, size_t n) {
+    __block int rc = -1;
+    void (^run)(void) = ^{
+        DesktopDnsRule rules[DESKTOP_DNS_RULE_MAX];
+        __block int count = desktop_dns_parse(map, rules, DESKTOP_DNS_RULE_MAX);
+        SkyEngineDnsEditor *editor = [[SkyEngineDnsEditor alloc] init];
+        NSAlert *alert = [[NSAlert alloc] init];
+        [alert setMessageText:@"域名替换规则"];
+        [alert setInformativeText:@"选择一条后可删除。"];
+        [alert addButtonWithTitle:@"新增"];
+        [alert addButtonWithTitle:@"删除"];
+        [alert addButtonWithTitle:@"关闭"];
+
+        NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 460, 200)];
+        [scroll setHasVerticalScroller:YES];
+        [scroll setBorderType:NSBezelBorder];
+        NSTableView *table = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 440, 200)];
+        NSTableColumn *col = [[NSTableColumn alloc] initWithIdentifier:@"rule"];
+        [col setWidth:420];
+        [col setTitle:@"现有替换"];
+        [table addTableColumn:col];
+        [table setHeaderView:nil];
+        [table setDataSource:editor];
+        editor.table = table;
+        [editor reloadRules:rules count:count];
+        [scroll setDocumentView:table];
+        [alert setAccessoryView:scroll];
+
+        for (;;) {
+            NSModalResponse resp = [alert runModal];
+            if (resp == NSAlertFirstButtonReturn) {
+                NSAlert *pair = [[NSAlert alloc] init];
+                [pair setMessageText:@"新增域名替换"];
+                [pair addButtonWithTitle:@"确定"];
+                [pair addButtonWithTitle:@"取消"];
+                NSView *box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 360, 90)];
+                NSTextField *from_l = [NSTextField labelWithString:@"被替换值"];
+                [from_l setFrame:NSMakeRect(0, 66, 360, 18)];
+                NSTextField *from_e = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 44, 360, 22)];
+                NSTextField *to_l = [NSTextField labelWithString:@"替换值"];
+                [to_l setFrame:NSMakeRect(0, 22, 360, 18)];
+                NSTextField *to_e = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 360, 22)];
+                [box addSubview:from_l];
+                [box addSubview:from_e];
+                [box addSubview:to_l];
+                [box addSubview:to_e];
+                [pair setAccessoryView:box];
+                if ([pair runModal] == NSAlertFirstButtonReturn && count < DESKTOP_DNS_RULE_MAX) {
+                    char from[DESKTOP_DNS_HOST_MAX];
+                    char to[DESKTOP_DNS_HOST_MAX];
+                    copy_utf8([from_e stringValue], from, sizeof(from));
+                    copy_utf8([to_e stringValue], to, sizeof(to));
+                    if (from[0] && to[0]) {
+                        snprintf(rules[count].from, sizeof(rules[0].from), "%s", from);
+                        snprintf(rules[count].to, sizeof(rules[0].to), "%s", to);
+                        count++;
+                        [editor reloadRules:rules count:count];
+                    }
+                }
+                continue;
+            }
+            if (resp == NSAlertSecondButtonReturn) {
+                NSInteger row = [table selectedRow];
+                if (row >= 0 && row < count) {
+                    int i = (int)row;
+                    if (i + 1 < count) {
+                        memmove(&rules[i], &rules[i + 1],
+                                (size_t)(count - i - 1) * sizeof(rules[0]));
+                    }
+                    count--;
+                    [editor reloadRules:rules count:count];
+                }
+                continue;
+            }
+            break;
+        }
+        rc = desktop_dns_serialize(rules, count, map, n);
+        (void)editor;
+    };
+    if ([NSThread isMainThread]) run();
+    else dispatch_sync(dispatch_get_main_queue(), run);
+    return rc;
+}
+
+int desktop_shell_cocoa_pick_sf2(char *out, size_t n) {
+    __block int rc = -1;
+    void (^run)(void) = ^{
+        NSOpenPanel *panel = [NSOpenPanel openPanel];
+        [panel setTitle:@"选择 SoundFont (SF2)"];
+        [panel setCanChooseFiles:YES];
+        [panel setCanChooseDirectories:NO];
+        [panel setAllowsMultipleSelection:NO];
+        [panel setAllowedFileTypes:@[@"sf2"]];
+        if ([panel runModal] == NSModalResponseOK) {
+            NSURL *url = [[panel URLs] firstObject];
+            if (url) rc = copy_utf8([url path], out, n);
         }
     };
     if ([NSThread isMainThread]) run();

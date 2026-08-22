@@ -10,10 +10,13 @@
 #include "../include/network.h"
 #include "../include/file_lib.h"
 #include "../include/utils.h"
+#include "../include/skyengine.h"
 
 #include <ctype.h>
 #ifndef _MSC_VER
 #include <unistd.h>
+#else
+#include <windows.h>
 #endif
 
 static void aex_t001(ArmExtModule *m, AexTableCtx *c) {
@@ -611,27 +614,30 @@ static void aex_t033(ArmExtModule *m, AexTableCtx *c) {
     uint32_t ret = MR_SUCCESS;
  {
             ret = mr_getTime();
-            /* 部分 ext 用忙等循环反复调 mr_getTime() 等真实时间流逝（菜单
-             * 动画）。时钟是 CLOCK_MONOTONIC，Unicorn 空转时也会走，不必
-             * usleep 来“推动”时间。旧 fork 的 table[33] 就是直接返回。
-             * 白跑分 v1.1.5 的 1 秒吞吐测试也是“干活 + getTime”，累加/
-             * 运算/排序几乎不调其它 table，连续 200 次 getTime 后 usleep(5ms)
-             * 会把 1 秒配额睡掉，分数只剩约 200+1000/5*100≈2 万（累加实测
-             * 19494），而旧版同机约 64 万。usleep 还在 emu_start 里，SDL
-             * 主循环同样转不到。只保留：连续 getTime 超过 3 秒则停 ARM，
-             * 让宿主定时器有机会跑（真死循环才需要）。验证：白跑分累加应
-             * 回到与 old/ 同量级；菜单动画仍靠墙钟满等待时长。 */
-            m->busy_wait_count++;
-            if (m->busy_wait_count == 1) {
-                m->busy_wait_start_ms = ret;
-            }
-            if (m->busy_wait_count >= 200) {
-                uint32_t elapsed_ms = ret - m->busy_wait_start_ms;
-                if (elapsed_ms >= 3000) {
-                    m->busy_wait_count = 0;
-                    m->busy_wait_start_ms = 0;
-                    reg_write32(m->uc, UC_ARM_REG_PC, EXT_STOP_ADDR);
-                    uc_emu_stop(m->uc);
+            /* 速度优先(默认):与 old fork 一样只回报墙钟,不 usleep、也不因
+             * 忙等停 ARM。兼容优先才恢复现在的 yield/3 秒停机,避免菜单动画
+             * 把宿主定时器饿死;白跑分 1 秒吞吐测试只在速度模式下接近 old。 */
+            if (skyengine_compat_priority()) {
+                m->busy_wait_count++;
+                if (m->busy_wait_count == 1) {
+                    m->busy_wait_start_ms = ret;
+                }
+                if (m->busy_wait_count >= 200) {
+#ifdef _MSC_VER
+                    Sleep(5);
+#else
+                    usleep(5 * 1000);
+#endif
+                    m->busy_wait_count = 100;
+                    {
+                        uint32_t elapsed_ms = ret - m->busy_wait_start_ms;
+                        if (elapsed_ms >= 3000) {
+                            m->busy_wait_count = 0;
+                            m->busy_wait_start_ms = 0;
+                            reg_write32(m->uc, UC_ARM_REG_PC, EXT_STOP_ADDR);
+                            uc_emu_stop(m->uc);
+                        }
+                    }
                 }
             }
         } goto aex_done;

@@ -49,6 +49,7 @@ SkyEngineConfig skyengine_config = {
     .device_year = DEFAULT_DEVICE_YEAR,
     .device_month = DEFAULT_DEVICE_MONTH,
     .device_day = DEFAULT_DEVICE_DAY,
+    .compat_priority = SKYENGINE_PROFILE_SPEED,
 };
 
 /* 旋转后的显示尺寸:奇数旋转(90°/270°)时为面板转置,否则即面板尺寸。
@@ -279,6 +280,7 @@ int startEngine(const SkyEngineArgs *args) {
     skyengine_config.screen_height = args->screen_height;
     /* LCD 旋转由 dsm_init() 随 DSM 初始化归零(skyengine_runtime_init 内) */
     skyengine_config.memory_mb = args->memory_mb;
+    skyengine_config.compat_priority = args->compat_priority ? 1 : 0;
     /* The DSM callback reads this virtual handset RTC through table[34]. */
     skyengine_config.device_year = args->device_year;
     skyengine_config.device_month = args->device_month;
@@ -287,13 +289,14 @@ int startEngine(const SkyEngineArgs *args) {
         return MR_FAILED;
     }
 
-    if (args->dns_map[0]) {
-        if (my_configureDnsMap(args->dns_map) != MR_SUCCESS) {
-            fprintf(stderr, "skyengine: invalid DNS map '%s'\n", args->dns_map);
-            return MR_FAILED;
-        }
+    /* 空串也要配置:GUI 删光规则后必须清空运行时映射,不能沿用上一轮。 */
+    if (my_configureDnsMap(args->dns_map) != MR_SUCCESS) {
+        fprintf(stderr, "skyengine: invalid DNS map '%s'\n", args->dns_map);
+        return MR_FAILED;
     }
 
+    SKYENGINE_LOG("[startEngine] profile=%s\n",
+                  skyengine_config.compat_priority ? "compat" : "speed");
     SKYENGINE_LOG("[startEngine] skyengine_runtime_init...\n");
     if (skyengine_runtime_init(&runtime) != MR_SUCCESS) return MR_FAILED;
     SKYENGINE_LOG("[startEngine] skyengine_runtime_init OK\n");

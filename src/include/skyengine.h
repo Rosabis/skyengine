@@ -26,7 +26,14 @@ typedef struct SkyEngineConfig {
     /* 全局 MIDI 渲染开关:非空时用 TinySoundFont 播放 SF2 音色库,为空走内置
      * 波形合成。桌面由 --sf2/环境变量注入,Android 由 vmrp.cfg 的 sf2= 键读取。 */
     char sf2_path[PATH_MAX];
+    /* 0=速度优先(默认,稀钩子,接近 old/);1=兼容优先(宽 R9/GOT/屏写钩)。
+     * 桌面「设置」改完后重启引擎才重新安装 Unicorn 钩子。 */
+    int compat_priority;
 } SkyEngineConfig;
+
+static inline int skyengine_compat_priority(void) {
+    return skyengine_config.compat_priority ? 1 : 0;
+}
 
 /* 应用可见内存(字节),memory_mb 为 0 时取默认值 */
 static inline uint32_t SKYENGINE_MEMORY_bytes(int memory_mb) {

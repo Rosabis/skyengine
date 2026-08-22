@@ -30,11 +30,17 @@
 #define SKYENGINE_SRC_EXT      (1u << 6)
 #define SKYENGINE_SRC_ENTRY    (1u << 7)
 #define SKYENGINE_SRC_SF2      (1u << 8)
+#define SKYENGINE_SRC_PROFILE  (1u << 9)
+
+/* 0=速度优先(默认,接近 old fork 的稀钩子);1=兼容优先(宽 R9/GOT/屏写钩)。 */
+#define SKYENGINE_PROFILE_SPEED 0
+#define SKYENGINE_PROFILE_COMPAT 1
 
 typedef struct SkyEngineArgs {
     int screen_width;
     int screen_height;
     int memory_mb; /* 应用可见内存(MB):1/2/4/6/8/16 */
+    int compat_priority; /* SKYENGINE_PROFILE_SPEED/COMPAT */
     int device_year;  /* 0 表示直接使用宿主日期 */
     int device_month;
     int device_day;
@@ -54,6 +60,7 @@ SkyEngineArgs skyengine_args_default(void);
 int skyengine_args_parse_device_date(const char *str, int *year, int *month, int *day);
 int skyengine_args_parse_screen(const char *str, int *w, int *h);
 int skyengine_args_parse_memory(const char *str, int *mb);
+int skyengine_args_parse_profile(const char *str, int *out);
 void skyengine_args_format_device_date(const SkyEngineArgs *args, char *out, size_t out_sz);
 int skyengine_args_resolve_mrp_path(const char *input, char *output, size_t output_size);
 int skyengine_args_resolve_dir(const char *input, char *output, size_t output_size);

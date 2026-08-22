@@ -243,6 +243,8 @@ void skyengine_args_print_usage(const char *program) {
     printf("  --dns-map MAP       Resolve original domains using fake domains\n");
     printf("  --sf2 PATH          SoundFont (.sf2) for MIDI playback via TinySoundFont\n");
     printf("                      (omit to keep built-in waveform synthesis)\n");
+    printf("  --profile MODE      speed (default, fewer Unicorn hooks) or compat\n");
+    printf("                      (wide R9/GOT/screen hooks; takes effect at engine start)\n");
     printf("\n");
     printf("Environment variables:\n");
     printf("  SKYENGINE_SCREEN_WIDTH   Screen width  (overridden by --screen)\n");
@@ -252,6 +254,7 @@ void skyengine_args_print_usage(const char *program) {
     printf("  SKYENGINE_WORK_DIR       Working directory (overridden by --work-dir)\n");
     printf("  SKYENGINE_DNS_MAP        Domain map, e.g. old.example->new.example\n");
     printf("  SKYENGINE_SF2            SoundFont path (overridden by --sf2)\n");
+    printf("  SKYENGINE_PROFILE        speed or compat (overridden by --profile)\n");
     printf("  SKYENGINE_PPM_PATH       PPM screen dump path for SIGUSR1/verification\n");
     printf("  SKYENGINE_E2E_SOCKET     Local E2E endpoint (Unix socket or Windows named pipe)\n");
     printf("\n");
@@ -262,6 +265,7 @@ void skyengine_args_print_usage(const char *program) {
     printf("  %s --memory 4M /path/to/app.mrp\n", name);
     printf("  %s --device-date host /path/to/app.mrp\n", name);
     printf("  %s --dns-map old.example->new.example /path/to/app.mrp\n", name);
+    printf("  %s --profile compat /path/to/app.mrp\n", name);
     printf("  %s /path/to/app.mrp start.mr _dsm\n", name);
 }
 
@@ -335,6 +339,24 @@ int skyengine_args_parse_memory(const char *str, int *mb) {
     return MR_SUCCESS;
 }
 
+int skyengine_args_parse_profile(const char *str, int *out) {
+    if (!str || !out) return MR_FAILED;
+    while (*str == ' ' || *str == '\t') str++;
+    if (strcmp(str, "speed") == 0 || strcmp(str, "Speed") == 0 ||
+        strcmp(str, "SPEED") == 0 || strcmp(str, "速度") == 0 ||
+        strcmp(str, "速度优先") == 0) {
+        *out = SKYENGINE_PROFILE_SPEED;
+        return MR_SUCCESS;
+    }
+    if (strcmp(str, "compat") == 0 || strcmp(str, "Compat") == 0 ||
+        strcmp(str, "COMPAT") == 0 || strcmp(str, "compatibility") == 0 ||
+        strcmp(str, "兼容") == 0 || strcmp(str, "兼容性优先") == 0) {
+        *out = SKYENGINE_PROFILE_COMPAT;
+        return MR_SUCCESS;
+    }
+    return MR_FAILED;
+}
+
 int skyengine_args_parse_device_date(const char *str, int *year, int *month, int *day) {
     static const int days_per_month[] = {
         0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
@@ -389,7 +411,8 @@ static int parse_positional_args(int argc, char *argv[], const char **mrp_arg,
                                  const char **ext_arg, const char **entry_arg,
                                  const char **screen_arg, const char **work_dir_arg,
                                  const char **dns_map_arg, const char **memory_arg,
-                                 const char **device_date_arg, const char **sf2_arg) {
+                                 const char **device_date_arg, const char **sf2_arg,
+                                 const char **profile_arg) {
     int positional = 0;
     int after_dashdash = 0;
     *mrp_arg = NULL;
@@ -401,6 +424,7 @@ static int parse_positional_args(int argc, char *argv[], const char **mrp_arg,
     *memory_arg = NULL;
     *device_date_arg = NULL;
     *sf2_arg = NULL;
+    *profile_arg = NULL;
 
     for (int i = 1; i < argc; i++) {
         const char *arg = argv[i];
@@ -456,6 +480,14 @@ static int parse_positional_args(int argc, char *argv[], const char **mrp_arg,
             *sf2_arg = argv[++i];
             continue;
         }
+        if (!after_dashdash && strcmp(arg, "--profile") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "skyengine: --profile requires speed or compat\n");
+                return MR_FAILED;
+            }
+            *profile_arg = argv[++i];
+            continue;
+        }
         if (!after_dashdash && arg[0] == '-') {
             fprintf(stderr, "skyengine: unknown option: %s\n", arg);
             skyengine_args_print_usage(argv[0]);
@@ -488,13 +520,15 @@ int skyengine_args_parse(int argc, char *argv[], SkyEngineArgs *out) {
     const char *memory_arg = NULL;
     const char *device_date_arg = NULL;
     const char *sf2_arg = NULL;
+    const char *profile_arg = NULL;
 
     *out = skyengine_args_default();
     skyengine_args_set_default_dirs(out, (argc > 0) ? argv[0] : NULL);
 
     if (parse_positional_args(argc, argv, &mrp_arg, &ext_arg, &entry_arg,
                               &screen_arg, &work_dir_arg, &dns_map_arg,
-                              &memory_arg, &device_date_arg, &sf2_arg) != MR_SUCCESS) {
+                              &memory_arg, &device_date_arg, &sf2_arg,
+                              &profile_arg) != MR_SUCCESS) {
         return MR_FAILED;
     }
 
@@ -641,6 +675,22 @@ int skyengine_args_parse(int argc, char *argv[], SkyEngineArgs *out) {
             snprintf(out->sf2_path, sizeof(out->sf2_path), "%s", sf2);
             out->sourced |= SKYENGINE_SRC_SF2;
         }
+    }
+
+    /* Profile: CLI --profile > env > default speed (old-fork hook density). */
+    if (!profile_arg) {
+        const char *env_profile = getenv("SKYENGINE_PROFILE");
+        if (env_profile && *env_profile) profile_arg = env_profile;
+    }
+    if (profile_arg) {
+        int profile = SKYENGINE_PROFILE_SPEED;
+        if (skyengine_args_parse_profile(profile_arg, &profile) != MR_SUCCESS) {
+            fprintf(stderr, "skyengine: invalid --profile '%s' (expected speed or compat)\n",
+                    profile_arg);
+            return MR_FAILED;
+        }
+        out->compat_priority = profile;
+        out->sourced |= SKYENGINE_SRC_PROFILE;
     }
 
     return MR_SUCCESS;

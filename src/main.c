@@ -1582,10 +1582,11 @@ int main(int argc, char *args[]) {
      * Android 走 logcat、Emscripten 无落盘,均不启用。 */
     skyengine_log_init();
     atexit(skyengine_log_shutdown);
-    skyengine_log_msg("[main] work_dir='%s' mrp='%s' ext='%s' screen=%dx%d\n",
+    skyengine_log_msg("[main] work_dir='%s' mrp='%s' ext='%s' screen=%dx%d profile=%s\n",
                        skyengine_args.work_dir, skyengine_args.mrp_path,
                        skyengine_args.ext_name,
-                       skyengine_args.screen_width, skyengine_args.screen_height);
+                       skyengine_args.screen_width, skyengine_args.screen_height,
+                       skyengine_args.compat_priority ? "compat" : "speed");
 #endif
 
 #ifdef __x86_64__
@@ -1640,6 +1641,8 @@ int main(int argc, char *args[]) {
     /* vmrp.cfg 覆盖 CLI 分辨率，写 skyengine_config.screen_*。放在上面同步
      * 之后、建窗之前，否则会被 CLI 值覆盖回 240x320。 */
     android_load_config("vmrp.cfg");
+    /* startEngine 从 args 再写回 config;cfg 的 profile 必须灌进 args 才生效。 */
+    skyengine_args.compat_priority = skyengine_config.compat_priority;
 #endif
 
     /* guiDrawBitmap writes to SDL_GetWindowSurface(); avoiding an OpenGL window
@@ -1692,6 +1695,10 @@ int main(int argc, char *args[]) {
         skyengine_args = g_desktop_args;
         skyengine_config.screen_width = skyengine_args.screen_width;
         skyengine_config.screen_height = skyengine_args.screen_height;
+        if (skyengine_args.sf2_path[0]) {
+            snprintf(skyengine_config.sf2_path, sizeof(skyengine_config.sf2_path),
+                     "%s", skyengine_args.sf2_path);
+        }
         SDL_SetWindowSize(window, skyengine_args.screen_width,
                           skyengine_args.screen_height);
     }

@@ -19,6 +19,20 @@
 #define CMD_DATE 2003
 #define CMD_WORKDIR 2004
 #define CMD_DNS 2005
+#define CMD_PROFILE 2006
+#define CMD_SF2 2007
+
+#define DESKTOP_DNS_RULE_MAX 32
+#define DESKTOP_DNS_HOST_MAX 256
+
+typedef struct DesktopDnsRule {
+    char from[DESKTOP_DNS_HOST_MAX];
+    char to[DESKTOP_DNS_HOST_MAX];
+} DesktopDnsRule;
+
+int desktop_dns_parse(const char *map, DesktopDnsRule *rules, int max);
+int desktop_dns_serialize(const DesktopDnsRule *rules, int count, char *out, size_t n);
+void desktop_dns_format(const DesktopDnsRule *rule, char *out, size_t n);
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,6 +58,8 @@ int desktop_shell_cocoa_prompt(const char *title, const char *label,
                                const char *initial, char *out, size_t n,
                                int multiline, const char **choices, int nchoices,
                                int list_only);
+int desktop_shell_cocoa_dns_editor(char *map, size_t n);
+int desktop_shell_cocoa_pick_sf2(char *out, size_t n);
 #endif
 
 #ifdef SKYENGINE_HAS_GTK
@@ -66,6 +82,8 @@ int desktop_shell_gtk_prompt(const char *title, const char *label,
                              const char *initial, char *out, size_t n,
                              int multiline, const char **choices, int nchoices,
                              int list_only);
+int desktop_shell_gtk_dns_editor(char *map, size_t n);
+int desktop_shell_gtk_pick_sf2(char *out, size_t n);
 #endif
 
 #ifdef __cplusplus

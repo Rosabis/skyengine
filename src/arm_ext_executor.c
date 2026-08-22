@@ -1375,33 +1375,38 @@ int arm_ext_load(ArmExtModule **out, const uint8 *code, uint32 len, int32 load_c
                           EXT_CODE_ADDR, EXT_CODE_ADDR + len);
         if (err != UC_ERR_OK) goto fail;
     }
-    uc_hook restore_hook;
-    err = uc_hook_add(m->uc, &restore_hook, UC_HOOK_BLOCK, hook_restore_r9, m,
-                      EXT_BASE_ADDR, EXT_BASE_ADDR + EXT_MEM_SIZE - 1);
-    if (err != UC_ERR_OK) goto fail;
-    uc_hook restore_platform_hook;
-    err = uc_hook_add(m->uc, &restore_platform_hook, UC_HOOK_BLOCK,
-                      hook_restore_r9, m,
-                      EXT_PLATFORM_MEM_ADDR,
-                      EXT_PLATFORM_MEM_ADDR + EXT_PLATFORM_MEM_SIZE - 1);
-    if (err != UC_ERR_OK) goto fail;
-    uc_hook restore_platform_io_hook;
-    err = uc_hook_add(m->uc, &restore_platform_io_hook, UC_HOOK_BLOCK,
-                      hook_restore_r9, m,
-                      EXT_PLATFORM_IO_MEM_ADDR,
-                      EXT_PLATFORM_IO_MEM_ADDR + EXT_PLATFORM_IO_MEM_SIZE - 1);
-    if (err != UC_ERR_OK) goto fail;
-    uc_hook restore_platform_alt_hook;
-    err = uc_hook_add(m->uc, &restore_platform_alt_hook, UC_HOOK_BLOCK,
-                      hook_restore_r9, m,
-                      EXT_PLATFORM_ALT_MEM_ADDR,
-                      EXT_PLATFORM_ALT_MEM_ADDR + EXT_PLATFORM_ALT_MEM_SIZE - 1);
-    if (err != UC_ERR_OK) goto fail;
-    uc_hook screen_hook;
-    if (m->screen_addr && m->screen_len) {
-        err = uc_hook_add(m->uc, &screen_hook, UC_HOOK_MEM_WRITE, hook_screen_write, m,
-                          m->screen_addr, m->screen_addr + m->screen_len - 1);
+    /* 速度优先(默认):接近 old fork,不在 16MB 热路径上挂每块 R9/整 heap GOT/
+     * 屏写钩。兼容优先:现在这套宽钩,嵌套 EXT/dump 恢复需要。设置改完后
+     * 重启引擎才会重新 install。 */
+    if (skyengine_compat_priority()) {
+        uc_hook restore_hook;
+        err = uc_hook_add(m->uc, &restore_hook, UC_HOOK_BLOCK, hook_restore_r9, m,
+                          EXT_BASE_ADDR, EXT_BASE_ADDR + EXT_MEM_SIZE - 1);
         if (err != UC_ERR_OK) goto fail;
+        uc_hook restore_platform_hook;
+        err = uc_hook_add(m->uc, &restore_platform_hook, UC_HOOK_BLOCK,
+                          hook_restore_r9, m,
+                          EXT_PLATFORM_MEM_ADDR,
+                          EXT_PLATFORM_MEM_ADDR + EXT_PLATFORM_MEM_SIZE - 1);
+        if (err != UC_ERR_OK) goto fail;
+        uc_hook restore_platform_io_hook;
+        err = uc_hook_add(m->uc, &restore_platform_io_hook, UC_HOOK_BLOCK,
+                          hook_restore_r9, m,
+                          EXT_PLATFORM_IO_MEM_ADDR,
+                          EXT_PLATFORM_IO_MEM_ADDR + EXT_PLATFORM_IO_MEM_SIZE - 1);
+        if (err != UC_ERR_OK) goto fail;
+        uc_hook restore_platform_alt_hook;
+        err = uc_hook_add(m->uc, &restore_platform_alt_hook, UC_HOOK_BLOCK,
+                          hook_restore_r9, m,
+                          EXT_PLATFORM_ALT_MEM_ADDR,
+                          EXT_PLATFORM_ALT_MEM_ADDR + EXT_PLATFORM_ALT_MEM_SIZE - 1);
+        if (err != UC_ERR_OK) goto fail;
+        uc_hook screen_hook;
+        if (m->screen_addr && m->screen_len) {
+            err = uc_hook_add(m->uc, &screen_hook, UC_HOOK_MEM_WRITE, hook_screen_write, m,
+                              m->screen_addr, m->screen_addr + m->screen_len - 1);
+            if (err != UC_ERR_OK) goto fail;
+        }
     }
     uc_hook invalid_hook;
     err = uc_hook_add(m->uc, &invalid_hook, UC_HOOK_MEM_INVALID, hook_invalid, m, 1, 0);
@@ -1409,9 +1414,8 @@ int arm_ext_load(ArmExtModule **out, const uint8 *code, uint32 len, int32 load_c
     uc_hook intr_hook;
     err = uc_hook_add(m->uc, &intr_hook, UC_HOOK_INTR, hook_intr, m, 1, 0);
     if (err != UC_ERR_OK) goto fail;
-    /* GOT bridge 指针追踪：ARM 代码向 R9 数据区写入 bridge 地址时记录，
-     * 后续 dump/restore 覆盖时自动修复 */
-    {
+    /* GOT 写钩铺整 heap 时,白跑分逐字节 strb 也会进 C。速度优先不加。 */
+    if (skyengine_compat_priority()) {
         uc_hook got_hook;
         uc_hook_add(m->uc, &got_hook, UC_HOOK_MEM_WRITE, hook_got_write, m,
                     EXT_HEAP_ADDR, EXT_BASE_ADDR + EXT_MEM_SIZE - 1);

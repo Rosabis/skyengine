@@ -100,6 +100,13 @@ void android_load_config(const char *path) {
             /* SF2 音色库路径:非空时原生 MIDI 用 TinySoundFont 渲染,为空则
              * 回退到内置波形合成。路径相对内部存储 filesDir,或为绝对路径。 */
             snprintf(skyengine_config.sf2_path, sizeof(skyengine_config.sf2_path), "%s", val);
+        } else if (strcmp(key, "profile") == 0) {
+            /* 与桌面 --profile 相同:speed=稀钩子(默认),compat=宽钩子。
+             * 写入 skyengine_config,main.c 再灌回 args,下次 startEngine 生效。 */
+            int profile = SKYENGINE_PROFILE_SPEED;
+            if (skyengine_args_parse_profile(val, &profile) == MR_SUCCESS) {
+                skyengine_config.compat_priority = profile;
+            }
         }
     }
     fclose(fp);

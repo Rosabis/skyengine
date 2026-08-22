@@ -689,6 +689,15 @@ VMRP_EXPORT int skyengine_api_set_work_dir(const char *work_dir) {
     return 0;
 }
 
+VMRP_EXPORT int skyengine_api_set_profile(const char *mode) {
+    int profile = SKYENGINE_PROFILE_SPEED;
+    /* Unicorn 钩子在 arm_ext_load 安装,运行中途改无效,必须停机再 start。 */
+    if (skyengine_api_is_running()) return -1;
+    if (skyengine_args_parse_profile(mode, &profile) != MR_SUCCESS) return -1;
+    skyengine_config.compat_priority = profile;
+    return 0;
+}
+
 VMRP_EXPORT int skyengine_api_start(const char *mrp_path, const char *ext, const char *entry) {
     VMRP_API_LOG("[skyengine_api] start('%s','%s','%s')\n", mrp_path ? mrp_path : "(null)",
                  ext ? ext : "(null)", entry ? entry : "(null)");
@@ -709,6 +718,7 @@ VMRP_EXPORT int skyengine_api_start(const char *mrp_path, const char *ext, const
     if (skyengine_config.memory_mb > 0) {
         args.memory_mb = skyengine_config.memory_mb;
     }
+    args.compat_priority = skyengine_config.compat_priority ? 1 : 0;
     if (skyengine_config.work_dir[0]) {
         snprintf(args.work_dir, sizeof(args.work_dir), "%s", skyengine_config.work_dir);
     }

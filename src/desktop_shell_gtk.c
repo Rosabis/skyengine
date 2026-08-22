@@ -65,11 +65,13 @@ static GtkWidget *build_menubar(void) {
     gtk_menu_shell_append(GTK_MENU_SHELL(file_menu), gtk_separator_menu_item_new());
     add_item(file_menu, "重启模拟器", CMD_RESTART);
 
+    add_item(set_menu, "设置运行模式...", CMD_PROFILE);
     add_item(set_menu, "设置屏幕分辨率...", CMD_SCREEN);
     add_item(set_menu, "设置应用可见内存...", CMD_MEMORY);
     add_item(set_menu, "设置应用可见设备日期...", CMD_DATE);
     add_item(set_menu, "设置运行和 MRP 文件系统的工作目录...", CMD_WORKDIR);
     add_item(set_menu, "设置域名替换规则...", CMD_DNS);
+    add_item(set_menu, "选择 SoundFont (SF2)...", CMD_SF2);
 
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(file_item), file_menu);
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(set_item), set_menu);
@@ -449,6 +451,154 @@ int desktop_shell_gtk_prompt(const char *title, const char *label,
             rc = 0;
         } else if (GTK_IS_ENTRY(widget)) {
             copy_str(out, n, gtk_entry_get_text(GTK_ENTRY(widget)));
+            rc = 0;
+        }
+    }
+    gtk_widget_destroy(dlg);
+    desktop_shell_gtk_idle();
+    return rc;
+}
+
+static void gtk_dns_refill(GtkListStore *store, const DesktopDnsRule *rules, int count) {
+    int i;
+    gtk_list_store_clear(store);
+    for (i = 0; i < count; i++) {
+        GtkTreeIter iter;
+        char line[DESKTOP_DNS_HOST_MAX * 2 + 8];
+        desktop_dns_format(&rules[i], line, sizeof(line));
+        gtk_list_store_append(store, &iter);
+        gtk_list_store_set(store, &iter, 0, line, -1);
+    }
+}
+
+static int gtk_dns_pair(char *from, size_t from_n, char *to, size_t to_n) {
+    GtkWidget *dlg, *content, *grid, *from_e, *to_e;
+    gint resp;
+    int rc = -1;
+    dlg = gtk_dialog_new_with_buttons("新增域名替换", dialog_parent(),
+                                      GTK_DIALOG_MODAL,
+                                      "确定", GTK_RESPONSE_OK,
+                                      "取消", GTK_RESPONSE_CANCEL, NULL);
+    content = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
+    grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+    gtk_container_set_border_width(GTK_CONTAINER(grid), 12);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("被替换值"), 0, 0, 1, 1);
+    from_e = gtk_entry_new();
+    gtk_widget_set_hexpand(from_e, TRUE);
+    gtk_grid_attach(GTK_GRID(grid), from_e, 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("替换值"), 0, 2, 1, 1);
+    to_e = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), to_e, 0, 3, 1, 1);
+    gtk_container_add(GTK_CONTAINER(content), grid);
+    gtk_widget_show_all(dlg);
+    resp = gtk_dialog_run(GTK_DIALOG(dlg));
+    if (resp == GTK_RESPONSE_OK) {
+        copy_str(from, from_n, gtk_entry_get_text(GTK_ENTRY(from_e)));
+        copy_str(to, to_n, gtk_entry_get_text(GTK_ENTRY(to_e)));
+        if (from[0] && to[0]) rc = 0;
+    }
+    gtk_widget_destroy(dlg);
+    desktop_shell_gtk_idle();
+    return rc;
+}
+
+int desktop_shell_gtk_dns_editor(char *map, size_t n) {
+    DesktopDnsRule rules[DESKTOP_DNS_RULE_MAX];
+    int count = desktop_dns_parse(map, rules, DESKTOP_DNS_RULE_MAX);
+    GtkWidget *dlg, *content, *scroll, *view;
+    GtkListStore *store;
+    GtkCellRenderer *cell;
+    GtkTreeViewColumn *col;
+    gint resp;
+
+    dlg = gtk_dialog_new_with_buttons("域名替换规则", dialog_parent(),
+                                      GTK_DIALOG_MODAL,
+                                      "新增", 1,
+                                      "删除", 2,
+                                      NULL);
+    gtk_window_set_default_size(GTK_WINDOW(dlg), 520, 360);
+    content = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
+    store = gtk_list_store_new(1, G_TYPE_STRING);
+    view = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
+    cell = gtk_cell_renderer_text_new();
+    col = gtk_tree_view_column_new_with_attributes("现有替换", cell, "text", 0, NULL);
+    gtk_tree_view_append_column(GTK_TREE_VIEW(view), col);
+    gtk_tree_selection_set_mode(gtk_tree_view_get_selection(GTK_TREE_VIEW(view)),
+                                GTK_SELECTION_SINGLE);
+    gtk_dns_refill(store, rules, count);
+    scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_size_request(scroll, 480, 240);
+    gtk_container_add(GTK_CONTAINER(scroll), view);
+    gtk_box_pack_start(GTK_BOX(content), scroll, TRUE, TRUE, 8);
+    gtk_widget_show_all(dlg);
+
+    for (;;) {
+        resp = gtk_dialog_run(GTK_DIALOG(dlg));
+        if (resp == 1) {
+            char from[DESKTOP_DNS_HOST_MAX];
+            char to[DESKTOP_DNS_HOST_MAX];
+            if (count >= DESKTOP_DNS_RULE_MAX) continue;
+            if (gtk_dns_pair(from, sizeof(from), to, sizeof(to)) == 0) {
+                copy_str(rules[count].from, sizeof(rules[0].from), from);
+                copy_str(rules[count].to, sizeof(rules[0].to), to);
+                count++;
+                gtk_dns_refill(store, rules, count);
+            }
+            continue;
+        }
+        if (resp == 2) {
+            GtkTreeIter iter;
+            GtkTreeModel *model = GTK_TREE_MODEL(store);
+            GtkTreeSelection *sel = gtk_tree_view_get_selection(GTK_TREE_VIEW(view));
+            GtkTreePath *path;
+            gint *idx;
+            if (!gtk_tree_selection_get_selected(sel, &model, &iter)) continue;
+            path = gtk_tree_model_get_path(model, &iter);
+            idx = gtk_tree_path_get_indices(path);
+            if (idx && idx[0] >= 0 && idx[0] < count) {
+                int i = idx[0];
+                if (i + 1 < count) {
+                    memmove(&rules[i], &rules[i + 1],
+                            (size_t)(count - i - 1) * sizeof(rules[0]));
+                }
+                count--;
+                gtk_dns_refill(store, rules, count);
+            }
+            gtk_tree_path_free(path);
+            continue;
+        }
+        break;
+    }
+    gtk_widget_destroy(dlg);
+    desktop_shell_gtk_idle();
+    g_object_unref(store);
+    return desktop_dns_serialize(rules, count, map, n);
+}
+
+int desktop_shell_gtk_pick_sf2(char *out, size_t n) {
+    GtkWidget *dlg;
+    gint resp;
+    int rc = -1;
+    dlg = gtk_file_chooser_dialog_new("选择 SoundFont (SF2)", dialog_parent(),
+                                      GTK_FILE_CHOOSER_ACTION_OPEN,
+                                      "取消", GTK_RESPONSE_CANCEL,
+                                      "打开", GTK_RESPONSE_ACCEPT, NULL);
+    {
+        GtkFileFilter *filter = gtk_file_filter_new();
+        gtk_file_filter_set_name(filter, "SF2");
+        gtk_file_filter_add_pattern(filter, "*.sf2");
+        gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dlg), filter);
+    }
+    resp = gtk_dialog_run(GTK_DIALOG(dlg));
+    if (resp == GTK_RESPONSE_ACCEPT) {
+        char *fn = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dlg));
+        if (fn) {
+            copy_str(out, n, fn);
+            g_free(fn);
             rc = 0;
         }
     }

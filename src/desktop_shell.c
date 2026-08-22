@@ -113,6 +113,91 @@ const char *desktop_shell_current_mrp(void) {
     return g_host.args ? g_host.args->mrp_path : "";
 }
 
+extern int32 my_configureDnsMap(const char *map);
+void native_audio_set_sf2(const char *path);
+
+void desktop_dns_format(const DesktopDnsRule *rule, char *out, size_t n) {
+    if (!out || n == 0) return;
+    if (!rule) {
+        out[0] = '\0';
+        return;
+    }
+    snprintf(out, n, "%s -> %s", rule->from, rule->to);
+}
+
+int desktop_dns_parse(const char *map, DesktopDnsRule *rules, int max) {
+    char buf[SKYENGINE_DNS_MAP_LIMIT];
+    char *entry;
+    char *next;
+    int n = 0;
+    if (!rules || max <= 0) return 0;
+    if (!map || !*map) return 0;
+    copy_str(buf, sizeof(buf), map);
+    entry = buf;
+    while (entry && *entry && n < max) {
+        char *sep;
+        next = entry;
+        while (*next && *next != ',' && *next != ';' && *next != '\n' && *next != '\r') {
+            next++;
+        }
+        if (*next) {
+            *next = '\0';
+            next++;
+        } else {
+            next = NULL;
+        }
+        trim_inplace(entry);
+        if (!*entry) {
+            entry = next;
+            continue;
+        }
+        sep = strstr(entry, "->");
+        if (sep) {
+            *sep = '\0';
+            trim_inplace(entry);
+            trim_inplace(sep + 2);
+            if (entry[0] && sep[2]) {
+                copy_str(rules[n].from, sizeof(rules[n].from), entry);
+                copy_str(rules[n].to, sizeof(rules[n].to), sep + 2);
+                n++;
+            }
+        } else {
+            sep = strchr(entry, '=');
+            if (sep) {
+                *sep = '\0';
+                trim_inplace(entry);
+                trim_inplace(sep + 1);
+                if (entry[0] && sep[1]) {
+                    copy_str(rules[n].from, sizeof(rules[n].from), entry);
+                    copy_str(rules[n].to, sizeof(rules[n].to), sep + 1);
+                    n++;
+                }
+            }
+        }
+        entry = next;
+    }
+    return n;
+}
+
+int desktop_dns_serialize(const DesktopDnsRule *rules, int count, char *out, size_t n) {
+    int i;
+    size_t used = 0;
+    if (!out || n == 0) return MR_FAILED;
+    out[0] = '\0';
+    if (!rules || count <= 0) return MR_SUCCESS;
+    for (i = 0; i < count; i++) {
+        char piece[DESKTOP_DNS_HOST_MAX * 2 + 8];
+        size_t plen;
+        if (!rules[i].from[0] || !rules[i].to[0]) continue;
+        snprintf(piece, sizeof(piece), "%s%s->%s", used ? ";" : "", rules[i].from, rules[i].to);
+        plen = strlen(piece);
+        if (used + plen >= n) return MR_FAILED;
+        memcpy(out + used, piece, plen + 1);
+        used += plen;
+    }
+    return MR_SUCCESS;
+}
+
 static void trim_inplace(char *s) {
     char *end;
     if (!s) return;
@@ -281,6 +366,14 @@ static void load_ui_config(SkyEngineArgs *args) {
             }
         } else if (strcmp(key, "dns_map") == 0 && !(args->sourced & SKYENGINE_SRC_DNS)) {
             copy_str(args->dns_map, sizeof(args->dns_map), val);
+        } else if (strcmp(key, "sf2") == 0 && !(args->sourced & SKYENGINE_SRC_SF2)) {
+            copy_str(args->sf2_path, sizeof(args->sf2_path), val);
+        } else if (strcmp(key, "profile") == 0 && !(args->sourced & SKYENGINE_SRC_PROFILE)) {
+            /* 桌面「设置运行模式」:CLI/--profile/SKYENGINE_PROFILE 优先于 ui.cfg。 */
+            int profile = SKYENGINE_PROFILE_SPEED;
+            if (skyengine_args_parse_profile(val, &profile) == MR_SUCCESS) {
+                args->compat_priority = profile;
+            }
         } else if (strcmp(key, "last_ext") == 0) {
             copy_str(g_last_ext, sizeof(g_last_ext), val);
         } else if (strcmp(key, "last_entry") == 0) {
@@ -309,6 +402,8 @@ static void save_ui_config(void) {
     fprintf(fp, "device_date=%s\n", date);
     fprintf(fp, "work_dir=%s\n", args->work_dir);
     fprintf(fp, "dns_map=%s\n", args->dns_map);
+    fprintf(fp, "sf2=%s\n", args->sf2_path);
+    fprintf(fp, "profile=%s\n", args->compat_priority ? "compat" : "speed");
     fprintf(fp, "last_ext=%s\n", g_last_ext[0] ? g_last_ext : "start.mr");
     fprintf(fp, "last_entry=%s\n", g_last_entry);
     for (i = 0; i < g_recent_count; i++) {
@@ -453,6 +548,11 @@ static int win_pick_dir(char *out, size_t out_sz) {
 
 #define DLG_ADVANCED 1
 #define DLG_PROMPT 2
+#define DLG_DNS 3
+#define DLG_DNS_PAIR 4
+#define IDC_DNS_LIST 300
+#define IDC_DNS_ADD 301
+#define IDC_DNS_DEL 302
 
 typedef struct {
     int kind;
@@ -475,6 +575,26 @@ typedef struct {
     int use_combo;
     char text_utf8[SKYENGINE_DNS_MAP_LIMIT];
 } PromptDlg;
+
+typedef struct {
+    int kind;
+    int result;
+    HWND hwnd;
+    HWND list;
+    DesktopDnsRule rules[DESKTOP_DNS_RULE_MAX];
+    int count;
+    char map_utf8[SKYENGINE_DNS_MAP_LIMIT];
+} DnsDlg;
+
+typedef struct {
+    int kind;
+    int result;
+    HWND hwnd;
+    HWND from;
+    HWND to;
+    char from_utf8[DESKTOP_DNS_HOST_MAX];
+    char to_utf8[DESKTOP_DNS_HOST_MAX];
+} DnsPairDlg;
 
 static HWND add_label(HWND parent, const wchar_t *text, int x, int y, int w, int h) {
     HWND hwnd = CreateWindowW(L"STATIC", text, WS_CHILD | WS_VISIBLE,
@@ -506,9 +626,84 @@ static void dlg_finish(HWND hwnd, int result) {
     } else if (any->kind == DLG_PROMPT && result == 1) {
         HWND field = any->use_combo ? any->combo : any->edit;
         dlg_capture_window_text(field, any->text_utf8, sizeof(any->text_utf8));
+    } else if (any->kind == DLG_DNS) {
+        DnsDlg *dns = (DnsDlg *)any;
+        desktop_dns_serialize(dns->rules, dns->count, dns->map_utf8, sizeof(dns->map_utf8));
+    } else if (any->kind == DLG_DNS_PAIR && result == 1) {
+        DnsPairDlg *pair = (DnsPairDlg *)any;
+        dlg_capture_window_text(pair->from, pair->from_utf8, sizeof(pair->from_utf8));
+        dlg_capture_window_text(pair->to, pair->to_utf8, sizeof(pair->to_utf8));
     }
     any->result = result;
     DestroyWindow(hwnd);
+}
+
+static void dns_fill_listbox(DnsDlg *dns) {
+    int i;
+    if (!dns || !dns->list) return;
+    SendMessageW(dns->list, LB_RESETCONTENT, 0, 0);
+    for (i = 0; i < dns->count; i++) {
+        char line[DESKTOP_DNS_HOST_MAX * 2 + 8];
+        wchar_t *wide;
+        desktop_dns_format(&dns->rules[i], line, sizeof(line));
+        wide = utf8_to_wide(line);
+        if (wide) {
+            SendMessageW(dns->list, LB_ADDSTRING, 0, (LPARAM)wide);
+            free(wide);
+        }
+    }
+}
+
+static int win_dns_pair_dialog(HWND owner, char *from, size_t from_n, char *to, size_t to_n) {
+    DnsPairDlg dlg;
+    RECT pr;
+    MSG msg;
+    HWND ok, cancel;
+    HWND parent = owner ? owner : g_hwnd;
+    int x = 0, y = 0;
+    memset(&dlg, 0, sizeof(dlg));
+    dlg.kind = DLG_DNS_PAIR;
+    if (parent && GetWindowRect(parent, &pr)) {
+        x = pr.left + 40;
+        y = pr.top + 40;
+    }
+    dlg.hwnd = CreateWindowExW(WS_EX_DLGMODALFRAME, L"SkyEngineDlg", L"新增域名替换",
+                               WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE,
+                               x, y, 420, 200, parent, NULL, GetModuleHandleW(NULL), NULL);
+    if (!dlg.hwnd) return MR_FAILED;
+    SetWindowLongPtrW(dlg.hwnd, GWLP_USERDATA, (LONG_PTR)&dlg);
+    add_label(dlg.hwnd, L"被替换值", 16, 12, 370, 20);
+    dlg.from = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                               16, 36, 370, 24, dlg.hwnd, (HMENU)310, GetModuleHandleW(NULL), NULL);
+    add_label(dlg.hwnd, L"替换值", 16, 68, 370, 20);
+    dlg.to = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                             WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                             16, 92, 370, 24, dlg.hwnd, (HMENU)311, GetModuleHandleW(NULL), NULL);
+    ok = CreateWindowW(L"BUTTON", L"确定",
+                       WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+                       206, 128, 90, 28, dlg.hwnd, (HMENU)IDOK, GetModuleHandleW(NULL), NULL);
+    cancel = CreateWindowW(L"BUTTON", L"取消",
+                           WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                           306, 128, 90, 28, dlg.hwnd, (HMENU)IDCANCEL, GetModuleHandleW(NULL), NULL);
+    apply_font(dlg.from);
+    apply_font(dlg.to);
+    apply_font(ok);
+    apply_font(cancel);
+    EnableWindow(parent, FALSE);
+    while (dlg.result == 0 && GetMessageW(&msg, NULL, 0, 0) > 0) {
+        if (!IsDialogMessageW(dlg.hwnd, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    EnableWindow(parent, TRUE);
+    if (dlg.result == 1) {
+        copy_str(from, from_n, dlg.from_utf8);
+        copy_str(to, to_n, dlg.to_utf8);
+        return (from[0] && to[0]) ? MR_SUCCESS : MR_FAILED;
+    }
+    return MR_FAILED;
 }
 
 static LRESULT CALLBACK shell_dlg_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -517,6 +712,40 @@ static LRESULT CALLBACK shell_dlg_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARA
     switch (msg) {
         case WM_COMMAND:
             if (!any) break;
+            if (any->kind == DLG_DNS) {
+                DnsDlg *dns = (DnsDlg *)any;
+                if (LOWORD(wparam) == IDC_DNS_ADD) {
+                    char from[DESKTOP_DNS_HOST_MAX];
+                    char to[DESKTOP_DNS_HOST_MAX];
+                    from[0] = '\0';
+                    to[0] = '\0';
+                    if (dns->count >= DESKTOP_DNS_RULE_MAX) {
+                        shell_error("替换规则已满（最多 32 条）。");
+                        return 0;
+                    }
+                    if (win_dns_pair_dialog(dns->hwnd, from, sizeof(from), to, sizeof(to)) == MR_SUCCESS) {
+                        copy_str(dns->rules[dns->count].from, sizeof(dns->rules[0].from), from);
+                        copy_str(dns->rules[dns->count].to, sizeof(dns->rules[0].to), to);
+                        dns->count++;
+                        dns_fill_listbox(dns);
+                    }
+                    return 0;
+                }
+                if (LOWORD(wparam) == IDC_DNS_DEL) {
+                    int sel = (int)SendMessageW(dns->list, LB_GETCURSEL, 0, 0);
+                    if (sel < 0 || sel >= dns->count) {
+                        shell_error("请先选择要删除的规则。");
+                        return 0;
+                    }
+                    if (sel + 1 < dns->count) {
+                        memmove(&dns->rules[sel], &dns->rules[sel + 1],
+                                (size_t)(dns->count - sel - 1) * sizeof(dns->rules[0]));
+                    }
+                    dns->count--;
+                    dns_fill_listbox(dns);
+                    return 0;
+                }
+            }
             if (LOWORD(wparam) == 201) {
                 char path[PATH_MAX];
                 wchar_t *wide;
@@ -547,7 +776,8 @@ static LRESULT CALLBACK shell_dlg_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARA
             }
             break;
         case WM_CLOSE:
-            dlg_finish(hwnd, -1);
+            /* 域名列表没有取消:关掉窗口即采用当前增删结果。 */
+            dlg_finish(hwnd, any && any->kind == DLG_DNS ? 1 : -1);
             return 0;
         default:
             break;
@@ -750,6 +980,75 @@ static int win_prompt(const wchar_t *title, const wchar_t *label, const char *in
     return dlg.result == 1 ? MR_SUCCESS : MR_FAILED;
 }
 
+static int win_dns_editor(char *map, size_t map_n) {
+    DnsDlg dlg;
+    RECT pr;
+    MSG msg;
+    HWND add, del;
+    int x = 0, y = 0;
+    memset(&dlg, 0, sizeof(dlg));
+    dlg.kind = DLG_DNS;
+    dlg.count = desktop_dns_parse(map, dlg.rules, DESKTOP_DNS_RULE_MAX);
+    if (g_hwnd && GetWindowRect(g_hwnd, &pr)) {
+        x = pr.left + 40;
+        y = pr.top + 40;
+    }
+    dlg.hwnd = CreateWindowExW(WS_EX_DLGMODALFRAME, L"SkyEngineDlg", L"域名替换规则",
+                               WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE,
+                               x, y, 520, 380, g_hwnd, NULL, GetModuleHandleW(NULL), NULL);
+    if (!dlg.hwnd) return MR_FAILED;
+    SetWindowLongPtrW(dlg.hwnd, GWLP_USERDATA, (LONG_PTR)&dlg);
+    add_label(dlg.hwnd, L"现有替换（选择一条后可删除）", 16, 12, 470, 20);
+    dlg.list = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
+                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
+                                   LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+                               16, 36, 470, 240, dlg.hwnd, (HMENU)IDC_DNS_LIST,
+                               GetModuleHandleW(NULL), NULL);
+    add = CreateWindowW(L"BUTTON", L"新增",
+                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+                        16, 292, 90, 28, dlg.hwnd, (HMENU)IDC_DNS_ADD,
+                        GetModuleHandleW(NULL), NULL);
+    del = CreateWindowW(L"BUTTON", L"删除",
+                        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                        116, 292, 90, 28, dlg.hwnd, (HMENU)IDC_DNS_DEL,
+                        GetModuleHandleW(NULL), NULL);
+    apply_font(dlg.list);
+    apply_font(add);
+    apply_font(del);
+    dns_fill_listbox(&dlg);
+    EnableWindow(g_hwnd, FALSE);
+    while (dlg.result == 0 && GetMessageW(&msg, NULL, 0, 0) > 0) {
+        if (!IsDialogMessageW(dlg.hwnd, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    EnableWindow(g_hwnd, TRUE);
+    if (g_hwnd) SetForegroundWindow(g_hwnd);
+    if (dlg.result == 1) {
+        copy_str(map, map_n, dlg.map_utf8);
+        return MR_SUCCESS;
+    }
+    return MR_FAILED;
+}
+
+static int win_pick_sf2(char *out, size_t out_sz) {
+    wchar_t file[MAX_PATH];
+    OPENFILENAMEW ofn;
+    file[0] = L'\0';
+    memset(&ofn, 0, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = g_hwnd;
+    ofn.lpstrFilter = L"SoundFont (*.sf2)\0*.sf2\0所有文件 (*.*)\0*.*\0";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrTitle = L"选择 SoundFont (SF2)";
+    ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
+                OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
+    if (!GetOpenFileNameW(&ofn)) return MR_FAILED;
+    return wide_to_utf8(file, out, out_sz);
+}
+
 static void win_rebuild_recent(void) {
     int i;
     if (!g_menu_recent) return;
@@ -808,11 +1107,13 @@ static int win_create_menu(void) {
     AppendMenuW(file_menu, MF_STRING, CMD_ADVANCED, L"高级启动...");
     AppendMenuW(file_menu, MF_SEPARATOR, 0, NULL);
     AppendMenuW(file_menu, MF_STRING, CMD_RESTART, L"重启模拟器");
+    AppendMenuW(settings_menu, MF_STRING, CMD_PROFILE, L"设置运行模式...");
     AppendMenuW(settings_menu, MF_STRING, CMD_SCREEN, L"设置屏幕分辨率...");
     AppendMenuW(settings_menu, MF_STRING, CMD_MEMORY, L"设置应用可见内存...");
     AppendMenuW(settings_menu, MF_STRING, CMD_DATE, L"设置应用可见设备日期...");
     AppendMenuW(settings_menu, MF_STRING, CMD_WORKDIR, L"设置运行和 MRP 文件系统的工作目录...");
     AppendMenuW(settings_menu, MF_STRING, CMD_DNS, L"设置域名替换规则...");
+    AppendMenuW(settings_menu, MF_STRING, CMD_SF2, L"选择 SoundFont (SF2)...");
     AppendMenuW(g_menu_bar, MF_POPUP, (UINT_PTR)file_menu, L"文件");
     AppendMenuW(g_menu_bar, MF_POPUP, (UINT_PTR)settings_menu, L"设置");
     SetMenu(g_hwnd, g_menu_bar);
@@ -1010,13 +1311,15 @@ static int posix_menu_pick(void) {
         "最近打开 MRP",
         "高级启动",
         "重启模拟器",
+        "设置运行模式",
         "设置屏幕分辨率",
         "设置应用可见内存",
         "设置应用可见设备日期",
         "设置运行和 MRP 文件系统的工作目录",
-        "设置域名替换规则"
+        "设置域名替换规则",
+        "选择 SoundFont (SF2)"
     };
-    if (posix_list("SkyEngine", "文件 / 设置", items, 10, choice, sizeof(choice)) != MR_SUCCESS) {
+    if (posix_list("SkyEngine", "文件 / 设置", items, 12, choice, sizeof(choice)) != MR_SUCCESS) {
         return CMD_NONE;
     }
     if (strcmp(choice, items[0]) == 0) return CMD_OPEN;
@@ -1024,12 +1327,108 @@ static int posix_menu_pick(void) {
     if (strcmp(choice, items[2]) == 0) return CMD_RECENT_BASE;
     if (strcmp(choice, items[3]) == 0) return CMD_ADVANCED;
     if (strcmp(choice, items[4]) == 0) return CMD_RESTART;
-    if (strcmp(choice, items[5]) == 0) return CMD_SCREEN;
-    if (strcmp(choice, items[6]) == 0) return CMD_MEMORY;
-    if (strcmp(choice, items[7]) == 0) return CMD_DATE;
-    if (strcmp(choice, items[8]) == 0) return CMD_WORKDIR;
-    if (strcmp(choice, items[9]) == 0) return CMD_DNS;
+    if (strcmp(choice, items[5]) == 0) return CMD_PROFILE;
+    if (strcmp(choice, items[6]) == 0) return CMD_SCREEN;
+    if (strcmp(choice, items[7]) == 0) return CMD_MEMORY;
+    if (strcmp(choice, items[8]) == 0) return CMD_DATE;
+    if (strcmp(choice, items[9]) == 0) return CMD_WORKDIR;
+    if (strcmp(choice, items[10]) == 0) return CMD_DNS;
+    if (strcmp(choice, items[11]) == 0) return CMD_SF2;
     return CMD_NONE;
+}
+
+static int posix_dns_pair(char *from, size_t from_n, char *to, size_t to_n) {
+    if (posix_entry("新增域名替换", "被替换值", "", from, from_n) != MR_SUCCESS) {
+        return MR_FAILED;
+    }
+    if (posix_entry("新增域名替换", "替换值", "", to, to_n) != MR_SUCCESS) {
+        return MR_FAILED;
+    }
+    trim_inplace(from);
+    trim_inplace(to);
+    return (from[0] && to[0]) ? MR_SUCCESS : MR_FAILED;
+}
+
+static int posix_dns_editor(char *map, size_t map_n) {
+    DesktopDnsRule rules[DESKTOP_DNS_RULE_MAX];
+    int count = desktop_dns_parse(map, rules, DESKTOP_DNS_RULE_MAX);
+    for (;;) {
+        char *actions[] = {"新增", "删除", "完成"};
+        char choice[32];
+        if (posix_list("域名替换规则", count ? "现有替换见下一项操作" : "当前没有替换规则",
+                       actions, 3, choice, sizeof(choice)) != MR_SUCCESS) {
+            return MR_FAILED;
+        }
+        if (strcmp(choice, "完成") == 0) break;
+        if (strcmp(choice, "新增") == 0) {
+            char from[DESKTOP_DNS_HOST_MAX];
+            char to[DESKTOP_DNS_HOST_MAX];
+            if (count >= DESKTOP_DNS_RULE_MAX) {
+                shell_error("替换规则已满（最多 32 条）。");
+                continue;
+            }
+            if (posix_dns_pair(from, sizeof(from), to, sizeof(to)) == MR_SUCCESS) {
+                copy_str(rules[count].from, sizeof(rules[0].from), from);
+                copy_str(rules[count].to, sizeof(rules[0].to), to);
+                count++;
+            }
+            continue;
+        }
+        if (strcmp(choice, "删除") == 0) {
+            char *items[DESKTOP_DNS_RULE_MAX];
+            char lines[DESKTOP_DNS_RULE_MAX][DESKTOP_DNS_HOST_MAX * 2 + 8];
+            char selected[DESKTOP_DNS_HOST_MAX * 2 + 8];
+            int i;
+            if (count <= 0) {
+                shell_error("没有可删除的规则。");
+                continue;
+            }
+            for (i = 0; i < count; i++) {
+                desktop_dns_format(&rules[i], lines[i], sizeof(lines[i]));
+                items[i] = lines[i];
+            }
+            if (posix_list("删除域名替换", "选择要删除的规则", items, count,
+                           selected, sizeof(selected)) != MR_SUCCESS) {
+                continue;
+            }
+            for (i = 0; i < count; i++) {
+                if (strcmp(selected, lines[i]) == 0) {
+                    if (i + 1 < count) {
+                        memmove(&rules[i], &rules[i + 1],
+                                (size_t)(count - i - 1) * sizeof(rules[0]));
+                    }
+                    count--;
+                    break;
+                }
+            }
+        }
+    }
+    return desktop_dns_serialize(rules, count, map, map_n);
+}
+
+static int posix_pick_sf2(char *out, size_t out_sz) {
+    int code = 1;
+    if (posix_have_tool("zenity")) {
+        char *argv[] = {
+            "zenity", "--file-selection", "--title=选择 SoundFont (SF2)",
+            "--file-filter=SF2 | *.sf2", "--file-filter=All | *", NULL
+        };
+        if (posix_run(argv, out, out_sz, &code) == MR_SUCCESS && code == 0 && out[0]) {
+            return MR_SUCCESS;
+        }
+        return MR_FAILED;
+    }
+    if (posix_have_tool("kdialog")) {
+        char *argv[] = {
+            "kdialog", "--getopenfilename", ".", "*.sf2", NULL
+        };
+        if (posix_run(argv, out, out_sz, &code) == MR_SUCCESS && code == 0 && out[0]) {
+            return MR_SUCCESS;
+        }
+        return MR_FAILED;
+    }
+    shell_error("未找到 zenity/kdialog，无法打开文件对话框。");
+    return MR_FAILED;
 }
 #endif /* !WIN32 && !APPLE */
 
@@ -1102,6 +1501,32 @@ static int plat_prompt(const char *title, const char *label, const char *initial
 #endif
 }
 #endif
+
+static int plat_dns_editor(char *map, size_t map_n) {
+#ifdef _WIN32
+    return win_dns_editor(map, map_n);
+#elif defined(__APPLE__)
+    return desktop_shell_cocoa_dns_editor(map, map_n);
+#else
+#ifdef SKYENGINE_HAS_GTK
+    if (desktop_shell_gtk_dns_editor(map, map_n) == 0) return MR_SUCCESS;
+#endif
+    return posix_dns_editor(map, map_n);
+#endif
+}
+
+static int pick_sf2(char *out, size_t out_sz) {
+#ifdef _WIN32
+    return win_pick_sf2(out, out_sz);
+#elif defined(__APPLE__)
+    return desktop_shell_cocoa_pick_sf2(out, out_sz);
+#else
+#ifdef SKYENGINE_HAS_GTK
+    if (desktop_shell_gtk_pick_sf2(out, out_sz) == 0) return MR_SUCCESS;
+#endif
+    return posix_pick_sf2(out, out_sz);
+#endif
+}
 
 static int run_open(void) {
     char path[PATH_MAX];
@@ -1198,6 +1623,39 @@ static int run_restart(void) {
     }
     desktop_shell_refresh();
     return MR_SUCCESS;
+}
+
+static int run_profile(void) {
+    char cur[32];
+    char next[32];
+    int profile = SKYENGINE_PROFILE_SPEED;
+    snprintf(cur, sizeof(cur), "%s",
+             g_host.args->compat_priority ? "兼容性优先" : "速度优先");
+#ifdef _WIN32
+    {
+        const wchar_t *choices[] = {L"速度优先", L"兼容性优先"};
+        if (win_prompt(L"设置运行模式",
+                       L"速度优先(默认,接近旧版稀钩子)或兼容性优先(宽 R9/GOT/屏写钩)。修改后重启生效。",
+                       cur, next, sizeof(next), 0, 0, choices, 2, 1) != MR_SUCCESS) {
+            return MR_FAILED;
+        }
+    }
+#else
+    {
+        const char *items[] = {"速度优先", "兼容性优先"};
+        if (plat_prompt("设置运行模式",
+                        "速度优先(默认,接近旧版稀钩子)或兼容性优先(宽 R9/GOT/屏写钩)。修改后重启生效。",
+                        cur, next, sizeof(next), 0, items, 2, 1) != MR_SUCCESS) {
+            return MR_FAILED;
+        }
+    }
+#endif
+    if (skyengine_args_parse_profile(next, &profile) != MR_SUCCESS) {
+        shell_error("无效运行模式，只接受速度优先或兼容性优先。");
+        return MR_FAILED;
+    }
+    g_host.args->compat_priority = profile;
+    return apply_settings_and_restart();
 }
 
 static int run_screen(void) {
@@ -1304,21 +1762,25 @@ static int run_workdir(void) {
 
 static int run_dns(void) {
     char next[SKYENGINE_DNS_MAP_LIMIT];
-#ifdef _WIN32
-    if (win_prompt(L"设置域名替换规则",
-                   L"多条规则用逗号或分号分隔，映射符为 -> 或 =。留空表示不替换。",
-                   g_host.args->dns_map, next, sizeof(next), 1, 0, NULL, 0, 0) != MR_SUCCESS) {
+    copy_str(next, sizeof(next), g_host.args->dns_map);
+    if (plat_dns_editor(next, sizeof(next)) != MR_SUCCESS) return MR_FAILED;
+    if (my_configureDnsMap(next) != MR_SUCCESS) {
+        shell_error("域名替换规则无效。");
         return MR_FAILED;
     }
-#else
-    if (plat_prompt("设置域名替换规则",
-                    "多条规则用逗号或分号分隔，映射符为 -> 或 =。留空表示不替换。",
-                    g_host.args->dns_map, next, sizeof(next), 1, NULL, 0, 0) != MR_SUCCESS) {
-        return MR_FAILED;
-    }
-#endif
     copy_str(g_host.args->dns_map, sizeof(g_host.args->dns_map), next);
-    return apply_settings_and_restart();
+    save_ui_config();
+    /* 映射表运行时可替换,不必重启引擎。 */
+    return MR_SUCCESS;
+}
+
+static int run_sf2(void) {
+    char path[PATH_MAX];
+    if (pick_sf2(path, sizeof(path)) != MR_SUCCESS) return MR_FAILED;
+    copy_str(g_host.args->sf2_path, sizeof(g_host.args->sf2_path), path);
+    save_ui_config();
+    native_audio_set_sf2(path);
+    return MR_SUCCESS;
 }
 
 static void run_command(int cmd, int recent_idx) {
@@ -1335,6 +1797,9 @@ static void run_command(int cmd, int recent_idx) {
         case CMD_RESTART:
             run_restart();
             break;
+        case CMD_PROFILE:
+            run_profile();
+            break;
         case CMD_SCREEN:
             run_screen();
             break;
@@ -1349,6 +1814,9 @@ static void run_command(int cmd, int recent_idx) {
             break;
         case CMD_DNS:
             run_dns();
+            break;
+        case CMD_SF2:
+            run_sf2();
             break;
         default:
             if (cmd == CMD_RECENT_BASE && recent_idx < 0) {

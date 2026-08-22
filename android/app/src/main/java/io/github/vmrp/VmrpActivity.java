@@ -15,6 +15,8 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -41,6 +43,7 @@ public class VmrpActivity extends SDLActivity {
     private static final String KEY_WIDTH = "width";
     private static final String KEY_HEIGHT = "height";
     private static final String KEY_SF2 = "sf2";
+    private static final String KEY_PROFILE = "profile";
     private static final String DEF_IMEI = "864086040622841";
     private static final String DEF_IMSI = "460019707327302";
     private static final String DEF_MANUF = "vmrp";
@@ -397,6 +400,23 @@ public class VmrpActivity extends SDLActivity {
         final EditText sf2 = addSettingField(form, getString(R.string.label_sf2),
                 sp.getString(KEY_SF2, ""), InputType.TYPE_CLASS_TEXT, 512);
         sf2.setHint(R.string.sf2_hint);
+        TextView profileTitle = new TextView(this);
+        profileTitle.setText(R.string.label_profile);
+        profileTitle.setPadding(0, 18, 0, 4);
+        form.addView(profileTitle);
+        RadioGroup profileGroup = new RadioGroup(this);
+        profileGroup.setOrientation(RadioGroup.VERTICAL);
+        RadioButton speedBtn = new RadioButton(this);
+        speedBtn.setId(View.generateViewId());
+        speedBtn.setText(R.string.profile_speed);
+        RadioButton compatBtn = new RadioButton(this);
+        compatBtn.setId(View.generateViewId());
+        compatBtn.setText(R.string.profile_compat);
+        profileGroup.addView(speedBtn);
+        profileGroup.addView(compatBtn);
+        boolean compat = "compat".equals(sp.getString(KEY_PROFILE, "speed"));
+        profileGroup.check(compat ? compatBtn.getId() : speedBtn.getId());
+        form.addView(profileGroup);
         ScrollView scroll = new ScrollView(this);
         scroll.addView(form);
         new AlertDialog.Builder(this)
@@ -416,6 +436,8 @@ public class VmrpActivity extends SDLActivity {
                         Toast.makeText(this, R.string.device_invalid, Toast.LENGTH_SHORT).show();
                         return;
                     }
+                    String profile = (profileGroup.getCheckedRadioButtonId() == compatBtn.getId())
+                            ? "compat" : "speed";
                     prefs().edit()
                             .putString(KEY_IMEI, imei.getText().toString().trim())
                             .putString(KEY_IMSI, imsi.getText().toString().trim())
@@ -424,6 +446,7 @@ public class VmrpActivity extends SDLActivity {
                             .putInt(KEY_WIDTH, nw)
                             .putInt(KEY_HEIGHT, nh)
                             .putString(KEY_SF2, sf2.getText().toString().trim())
+                            .putString(KEY_PROFILE, profile)
                             .apply();
                     writeConfigFile();
                     Toast.makeText(this, R.string.device_saved, Toast.LENGTH_SHORT).show();
@@ -446,6 +469,7 @@ public class VmrpActivity extends SDLActivity {
             w.write("width=" + sp.getInt(KEY_WIDTH, DEF_WIDTH) + "\n");
             w.write("height=" + sp.getInt(KEY_HEIGHT, DEF_HEIGHT) + "\n");
             w.write("sf2=" + sp.getString(KEY_SF2, "") + "\n");
+            w.write("profile=" + sp.getString(KEY_PROFILE, "speed") + "\n");
         } catch (IOException ignored) {
         }
     }

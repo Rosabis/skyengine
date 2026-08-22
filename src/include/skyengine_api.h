@@ -61,6 +61,12 @@ VMRP_EXPORT int skyengine_api_set_memory(int memory_mb);
  */
 VMRP_EXPORT int skyengine_api_set_device_date(const char *date);
 VMRP_EXPORT int skyengine_api_set_work_dir(const char *work_dir);
+/*
+ * Execution profile: "speed" (default, sparse Unicorn hooks, old-fork
+ * density) or "compat" (wide R9/GOT/screen hooks). Must be called before
+ * skyengine_api_start(); takes effect on the next start.
+ */
+VMRP_EXPORT int skyengine_api_set_profile(const char *mode);
 VMRP_EXPORT int skyengine_api_start(const char *mrp_path, const char *ext, const char *entry);
 VMRP_EXPORT void skyengine_api_destroy(void);
 VMRP_EXPORT int skyengine_api_is_running(void);

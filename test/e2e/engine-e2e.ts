@@ -22,6 +22,11 @@ export interface SkyEngineE2eOptions {
   memory?: "1M" | "2M" | "4M" | "6M" | "8M" | "16M";
   /** 应用可见设备日期；"host" 显式使用宿主墙钟日期。 */
   deviceDate?: `${number}-${number}-${number}` | "host";
+  /**
+   * 运行模式(--profile)。e2e 默认 compat,保持嵌套 EXT / dump 恢复回归路径;
+   * 桌面默认是 speed。显式传 speed 只用于对照稀钩子行为。
+   */
+  profile?: "speed" | "compat";
   /** 每次绘图后更新 defaultScreenPath，不向 SDL 事件队列注入 SCREEN。 */
   captureLatestFrame?: boolean;
 }
@@ -71,6 +76,7 @@ export class SkyEngineE2e {
   private readonly screenSize?: string;
   private readonly memorySize?: string;
   private readonly deviceDate?: string;
+  private readonly profile: "speed" | "compat";
   private readonly captureLatestFrame: boolean;
   private process?: ChildProcessByStdio<null, Readable, Readable>;
   private spawnError?: Error;
@@ -90,6 +96,7 @@ export class SkyEngineE2e {
     this.screenSize = options.screen;
     this.memorySize = options.memory;
     this.deviceDate = options.deviceDate;
+    this.profile = options.profile ?? "compat";
     this.captureLatestFrame = options.captureLatestFrame ?? false;
   }
 
@@ -299,6 +306,7 @@ export class SkyEngineE2e {
     if (this.screenSize) args.push("--screen", this.screenSize);
     if (this.memorySize) args.push("--memory", this.memorySize);
     if (this.deviceDate) args.push("--device-date", this.deviceDate);
+    args.push("--profile", this.profile);
     args.push(mrpPath);
     this.process = spawn(this.bin, args, {
       env: {
