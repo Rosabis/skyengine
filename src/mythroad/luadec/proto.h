@@ -8,7 +8,7 @@
 #include "../src/h/mr_undump.h"
 #include "../include/mrporting.h"
 #include "../include/mem.h"
-#include "../include/string.h"
+#include "../include/mystring.h"
 
 char *DecompileString(const Proto * f, int n);
 

@@ -12,7 +12,7 @@
 #include "./include/mr_tcp_target.h"
 #include "./include/mrporting.h"
 #include "./include/mythroad.h"
-#include "./include/string.h"
+#include "./include/mystring.h"
 #include "./include/encode.h"
 #include "./include/dsm.h" /* multichannel media lifecycle */
 #include "../include/arm_ext_executor.h"

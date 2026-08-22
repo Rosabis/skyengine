@@ -6,7 +6,7 @@
 #ifndef __cplusplus
 #include "stdlib.h"
 #endif
-#include "string.h"
+#include "mystring.h"
 
 #include "tomr.h"
 

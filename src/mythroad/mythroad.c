@@ -19,7 +19,7 @@
 #include "./include/mrporting.h"
 #include "./include/other.h"
 #include "./include/printf.h"
-#include "./include/string.h"
+#include "./include/mystring.h"
 #include "./luadec/luadec.h"
 #include "./include/dsm.h" /* dsm_motion_listening_mode:动感芯片监听状态 */
 #include "../include/arm_ext_executor.h"

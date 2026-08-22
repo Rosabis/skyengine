@@ -1,6 +1,6 @@
 #include "./include/md5.h"
 
-#include "./include/string.h"
+#include "./include/mystring.h"
 
 #define T1 0xd76aa478
 #define T2 0xe8c7b756

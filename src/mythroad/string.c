@@ -1,4 +1,4 @@
-#include "./include/string.h"
+#include "./include/mystring.h"
 
 #include "./include/mem.h"
 // copy from https://github.com/torvalds/linux/blob/master/lib/string.c

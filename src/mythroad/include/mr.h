@@ -5,7 +5,7 @@
 #include "mrporting.h"
 #include "other.h"
 #include "printf.h"
-#include "string.h"
+#include "mystring.h"
 #include "type.h"
 
 #define MR_START_FILE "start.mr"

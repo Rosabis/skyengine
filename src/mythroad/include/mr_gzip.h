@@ -3,7 +3,7 @@
 
 #include "mr.h"
 #include "other.h"
-#include "string.h"
+#include "mystring.h"
 
 #define memzero(s, n) memset2((void *)(s), 0, (n))
 

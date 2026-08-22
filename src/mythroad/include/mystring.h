@@ -25,7 +25,4 @@ char *strdup2(const char *s);
 
 
 
-
-
-
 #endif

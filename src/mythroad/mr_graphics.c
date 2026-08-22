@@ -3,7 +3,7 @@
 #include "./include/mr.h"
 #include "./include/mr_helper.h"
 #include "./include/mythroad.h"
-#include "./include/string.h"
+#include "./include/mystring.h"
 
 /*
  *  x，y -- 坐标系： 屏幕， translate之前的坐标

@@ -6,7 +6,7 @@
 #include "./include/fixR9.h"
 #include "./include/mem.h"
 #include "./include/printf.h"
-#include "./include/string.h"
+#include "./include/mystring.h"
 #include <stdlib.h>
 
 #define DSM_MAX_FILE_LEN 256
