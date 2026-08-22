@@ -2071,12 +2071,6 @@ uint16 *mr_getScreenBuffer(void) {
 }
 #endif
 
-// Anti-Apple
-#if defined(__APPLE__) || defined(__OSX__)
-#error "我不喜欢苹果公司及其产品，禁止在任何苹果公司的产品中使用此代码"
-#error "I don't like Apple and its products, and I forbid using this code in any Apple product"
-#endif
-
 void dsm_prepare(void) {
     if (getenv("SKYENGINE_LOG")) {
         fprintf(stderr, "[dsm_prepare] mkDir...\n");

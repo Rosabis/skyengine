@@ -1265,6 +1265,11 @@ int arm_ext_load(ArmExtModule **out, const uint8 *code, uint32 len, int32 load_c
         memset(m->mem, 0, EXT_MEM_SIZE);
     }
 #else
+    /* MAP_FIXED_NOREPLACE 是 Linux/Android(bionic) 扩展,macOS 没有;
+     * 退化为普通 MAP_PRIVATE|MAP_ANONYMOUS(地址仅作 hint),失败再回退 calloc。 */
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0
+#endif
     m->mem = mmap((void *)(uintptr_t)EXT_BASE_ADDR, EXT_MEM_SIZE,
                   PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
     if (m->mem == MAP_FAILED) {

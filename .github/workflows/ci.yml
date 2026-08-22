@@ -144,6 +144,7 @@ jobs:
           ORG_GRADLE_JVM_ARGS: "-Xmx4g"
         run: |
           cd android
+          chmod +x gradlew gradlew.bat
           ./gradlew :app:assembleDebug --no-daemon
 
       - name: Upload APK

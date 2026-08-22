@@ -9,7 +9,11 @@
 #include <dirent.h>
 #endif
 #include <fcntl.h>
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <sys/stat.h>
 #include <zlib.h>
 

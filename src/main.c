@@ -293,7 +293,6 @@ static E2eControl *e2eControl = NULL;
 static bool isEditMode = false;
 static int32_t editMaxSize = 0;
 static char *holdEditText = NULL;
-static char *holdEditUcs2 = NULL;
 static uint32_t clickSeq = 0;
 
 static SkyEngineKeyLatch keyLatch = SKYENGINE_KEY_LATCH_INITIALIZER;
@@ -530,8 +529,6 @@ static void edit_render(void) {
 
 static void edit_close_win(void);
 
-static void ucs2be_to_utf8(const char *ucs2, char *out, size_t out_size);
-
 static int utf8_prev_index(const char *s, int pos) {
     if (pos <= 0) return 0;
     int i = pos - 1;
@@ -626,9 +623,8 @@ static void edit_ensure_visible(void) {
 
 static void edit_open_win(const char *title) {
     edit_close_win();
-    if (title) {
-        ucs2be_to_utf8(title, edit_title, sizeof(edit_title));
-        if (!edit_title[0]) snprintf(edit_title, sizeof(edit_title), "input");
+    if (title && title[0]) {
+        snprintf(edit_title, sizeof(edit_title), "%s", title);
     } else {
         snprintf(edit_title, sizeof(edit_title), "input");
     }
@@ -757,28 +753,6 @@ static bool edit_handle_event(const SDL_Event *ev) {
 }
 #endif
 
-static void ucs2be_to_utf8(const char *ucs2, char *out, size_t out_size) {
-    if (!out || out_size == 0) return;
-    size_t o = 0;
-    const uint8_t *p = (const uint8_t *)ucs2;
-    while (o + 4 < out_size) {
-        uint16_t code = (uint16_t)((p[0] << 8) | p[1]);
-        if (code == 0) break;
-        p += 2;
-        if (code < 0x80) {
-            out[o++] = (char)code;
-        } else if (code < 0x800) {
-            out[o++] = (char)(0xC0 | (code >> 6));
-            out[o++] = (char)(0x80 | (code & 0x3F));
-        } else {
-            out[o++] = (char)(0xE0 | (code >> 12));
-            out[o++] = (char)(0x80 | ((code >> 6) & 0x3F));
-            out[o++] = (char)(0x80 | (code & 0x3F));
-        }
-    }
-    out[o] = '\0';
-}
-
 void saveEditText(char *str) {
     uint8_t *utf8Str = (uint8_t *)str;
     int32_t n = 0;
@@ -817,24 +791,24 @@ void guiStopShake(void) {
 int32_t editCreate(const char *title, const char *text, int32_t type, int32_t max_size) {
     isEditMode = true;
     editMaxSize = max_size;
-    char log_title[64] = {0}, log_text[64] = {0};
-    if (title) ucs2be_to_utf8(title, log_title, sizeof(log_title));
-    if (text) ucs2be_to_utf8(text, log_text, sizeof(log_text));
-    SDL_Log("title: '%s', text: '%s', type: %d, max_size: %d", log_title, log_text, type, max_size);
+    /* FLAG_USE_UTF8_EDIT 已启用:guest 的 UCS-2 大端字符串已由
+     * mythroad/dsm.mr_editCreate 转成 UTF-8,这里 title/text 直接是 UTF-8。
+     * 不能再用 ucs2be_to_utf8 处理,否则会二次转换导致标题乱码、输入变乱。 */
+    SDL_Log("title: '%s', text: '%s', type: %d, max_size: %d",
+            title ? title : "", text ? text : "", type, max_size);
 #if defined(__ANDROID__)
     {
         char utf8_title[128] = {0};
         char utf8_input[256] = {0};
-        /* guest 的 title/text 是 UCS-2 大端，先转 UTF-8 再交 Java 编辑框 */
-        if (title) ucs2be_to_utf8(title, utf8_title, sizeof(utf8_title));
-        if (text) ucs2be_to_utf8(text, utf8_input, sizeof(utf8_input));
+        if (title) snprintf(utf8_title, sizeof(utf8_title), "%s", title);
+        if (text) snprintf(utf8_input, sizeof(utf8_input), "%s", text);
         saveEditText(utf8_input);
         android_start_edit(utf8_title, utf8_input, max_size);
     }
 #elif !defined(__EMSCRIPTEN__)
     edit_buf[0] = '\0';
     edit_confirm = edit_cancel = false;
-    if (text) ucs2be_to_utf8(text, edit_buf, sizeof(edit_buf));
+    if (text) snprintf(edit_buf, sizeof(edit_buf), "%s", text);
     edit_cursor = (int)strlen(edit_buf);
     edit_scroll = 0;
     edit_nav_lock = false;
@@ -862,48 +836,16 @@ int32 editRelease(int32 edit) {
         my_freeExt(holdEditText);
         holdEditText = NULL;
     }
-    if (holdEditUcs2 != NULL) {
-        my_freeExt(holdEditUcs2);
-        holdEditUcs2 = NULL;
-    }
     return MR_SUCCESS;
 }
 
 char *editGetText(int32 edit) {
     (void)edit;
-    SDL_Log("editGetText(): '%s'", holdEditText);
-    if (holdEditText == NULL) return NULL;
-    if (holdEditUcs2 != NULL) {
-        my_freeExt(holdEditUcs2);
-        holdEditUcs2 = NULL;
-    }
-    size_t len = strlen(holdEditText);
-    uint8_t *out = (uint8_t *)my_mallocExt(len * 2 + 2);
-    if (!out) return holdEditText;
-    size_t n = 0;
-    const uint8_t *p = (const uint8_t *)holdEditText;
-    while (*p) {
-        uint32_t cp;
-        if (*p < 0x80) {
-            cp = *p++;
-        } else if ((*p & 0xe0) == 0xc0 && p[1]) {
-            cp = ((*p & 0x1f) << 6) | (p[1] & 0x3f);
-            p += 2;
-        } else if ((*p & 0xf0) == 0xe0 && p[1] && p[2]) {
-            cp = ((*p & 0x0f) << 12) | ((p[1] & 0x3f) << 6) | (p[2] & 0x3f);
-            p += 3;
-        } else {
-            cp = 0xFFFD;
-            p += 1;
-        }
-        out[n * 2] = (uint8_t)(cp >> 8);
-        out[n * 2 + 1] = (uint8_t)(cp & 0xff);
-        n++;
-    }
-    out[n * 2] = 0;
-    out[n * 2 + 1] = 0;
-    holdEditUcs2 = (char *)out;
-    return holdEditUcs2;
+    SDL_Log("editGetText(): '%s'", holdEditText ? holdEditText : "(null)");
+    /* FLAG_USE_UTF8_EDIT 已启用:这里直接返回 UTF-8,mythroad/dsm.mr_editGetText
+     * 会把它 UTF-8 → GB → UCS2-BE 交还 guest。不能再返回 UCS2-BE,否则二次转换
+     * 会让输入内容变成不可见的错误字符。 */
+    return holdEditText;
 }
 
 void guiDrawBitmapWithStride(uint16_t *bmp, int32_t x, int32_t y,
