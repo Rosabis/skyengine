@@ -309,7 +309,14 @@ int startEngine(const SkyEngineArgs *args) {
     const char *extName = args->ext_name;
     const char *entry = args->entry[0] ? args->entry : NULL;
 
+    #if defined(__ANDROID__)
+    /* Java 侧把固件解压到 filesDir/mythroad/dsm_gm.mrp(android_host_init
+     * 已把 cwd 切到 filesDir),默认名要带 mythroad/ 目录;桌面默认取仓库根
+     * 的 dsm_gm.mrp。 */
+    if (!filename || !*filename) filename = "mythroad/dsm_gm.mrp";
+#else
     if (!filename || !*filename) filename = "dsm_gm.mrp";
+#endif
     if (!extName || !*extName) extName = "start.mr";
 
     if (strlen(filename) >= VMRP_MRP_NAME_LIMIT) {

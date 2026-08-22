@@ -1,10 +1,13 @@
 #include "android_host.h"
 
 #include <jni.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <unistd.h>
 
 #include <SDL_system.h>
 
@@ -13,7 +16,23 @@
 
 static int g_keypad_h = 0;
 
+static char g_storage_dir[1024];
+
 void android_host_init(void) {
+    /* 运行时固件/配置(vmrp.cfg、mythroad/…)都被 Java 侧解压到 app 内部
+     * files 目录,而 Android 原生进程的 cwd 是系统根目录。这里把 cwd 切到
+     * 内部存储,之后对 "vmrp.cfg"、"mythroad/dsm_gm.mrp" 等相对路径的访问
+     * 才能命中解压产物;否则 apply_config_paths 默认切换到 "."(=/)导致
+     * 目标文件找不到,startEngine 直接失败、Activity 启动即闪退。 */
+    const char *storage = SDL_AndroidGetInternalStoragePath();
+    if (storage && storage[0]) {
+        snprintf(g_storage_dir, sizeof(g_storage_dir), "%s", storage);
+        if (chdir(g_storage_dir) != 0) {
+            fprintf(stderr, "[android_host] chdir('%s') failed: %s\n", g_storage_dir, strerror(errno));
+        }
+    } else {
+        fprintf(stderr, "[android_host] SDL_AndroidGetInternalStoragePath() unavailable\n");
+    }
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "Portrait");
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
