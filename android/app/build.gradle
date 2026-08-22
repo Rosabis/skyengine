@@ -152,12 +152,12 @@ android {
         versionCode 1
         versionName "1.0.0"
         ndk {
-            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+            abiFilters "arm64-v8a", "armeabi-v7a", "x86", "x86_64"
         }
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=c++_shared", "-DANDROID_ARM_NEON=TRUE"
-                abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+                abiFilters "arm64-v8a", "armeabi-v7a", "x86", "x86_64"
             }
         }
     }
