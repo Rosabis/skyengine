@@ -1055,10 +1055,25 @@ static void dsm_media_release(DsmMediaDevice *media) {
     media->status = MR_MEDIA_IDLE;
 }
 
+static void dsm_media_stop_host_mixer(void) {
+    /* FILE_LOAD 歌曲解码后的 PCM 在宿主混音器,退出 MRP 不会自动停 SDL。
+     * native_stopSound 当前按类型忽略并清整条 legacy 轨;按设备各停一次,
+     * 以免以后变成按类型停音时漏掉 MIDI/WAV。 */
+    int i;
+    for (i = ACI_MIDI_DEVICE; i <= ACI_AMR_WB_DEVICE; i++) {
+        int32 type = dsm_media_to_sound_type(i);
+        if (type != MR_FAILED) {
+            mr_stopSound(type);
+        }
+    }
+}
+
 static void dsm_media_reset_all(void) {
     /* VM 侧 BUF_LOAD/旧 FILE_LOAD 指针随 LG 堆一起失效,不能 mr_free。
-     * FILE_LOAD 改为宿主 malloc 后必须在这里释放,否则应用重启泄漏。 */
+     * FILE_LOAD 改为宿主 malloc 后必须在这里释放,否则应用重启泄漏。
+     * 回到 dsm_gm 会再走 dsm_init,必须先停宿主混音,否则退出 MRP 后歌还在响。 */
     int i;
+    dsm_media_stop_host_mixer();
     for (i = ACI_MIDI_DEVICE; i <= ACI_AMR_WB_DEVICE; i++) {
         if (dsm_media_devices[i].host_owned && dsm_media_devices[i].data) {
             free(dsm_media_devices[i].data);
@@ -1104,12 +1119,19 @@ static int32 dsm_media_channel_release(DsmMediaChannel *channel, int slot) {
 void dsm_media_channels_release_all(void) {
     /* App restart frees the whole Mythroad heap without calling dsm_init().
      * Stop host-owned decoded voices and release channel copies first so no
-     * slot can retain a dangling pointer into the next application's heap. */
-    for (int slot = 0; slot < DSM_MEDIA_CHANNEL_COUNT; slot++) {
+     * slot can retain a dangling pointer into the next application's heap.
+     * 听听音阅走 legacy mr_playSound 而不是 MUTICHANNEL,这里同样要停混音器。 */
+    int slot;
+    int i;
+    dsm_media_stop_host_mixer();
+    for (slot = 0; slot < DSM_MEDIA_CHANNEL_COUNT; slot++) {
         DsmMediaChannel *channel = &dsm_media_channels[slot];
         if (channel->in_use) {
             dsm_media_channel_release(channel, slot);
         }
+    }
+    for (i = ACI_MIDI_DEVICE; i <= ACI_AMR_WB_DEVICE; i++) {
+        dsm_media_release(&dsm_media_devices[i]);
     }
 }
 
