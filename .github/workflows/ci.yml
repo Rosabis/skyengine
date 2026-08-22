@@ -38,7 +38,7 @@ jobs:
 
       - name: Configure Linux
         if: runner.os == 'Linux'
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSKYENGINE_REQUIRE_GTK=ON
 
       - name: Configure Windows
         if: runner.os == 'Windows'
@@ -46,6 +46,12 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release --target skyengine --parallel
+
+      - name: Verify Linux GTK menubar is linked
+        if: runner.os == 'Linux'
+        run: |
+          ldd build/skyengine
+          ldd build/skyengine | grep -E 'libgtk-3\.so'
 
       - name: Package Linux artifacts
         if: runner.os == 'Linux'

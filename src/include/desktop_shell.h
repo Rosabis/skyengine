@@ -14,7 +14,8 @@ union SDL_Event;
  *
  * Windows:SetMenu 挂在 HWND 非客户区。
  * macOS:NSMenu 挂在屏幕顶部菜单栏(系统标准位置)。
- * Linux:X11/Wayland 没有窗口菜单 API;有 GTK3 时用 GtkMenuBar,否则 F10/右键。
+ * Linux:X11/Wayland 没有窗口菜单 API;有 GTK3 时用 GtkMenuBar
+ * (X11 为独立菜单窗口 + 无边框 SDL 跟随,不用 XReparent)。否则 F10/右键。
  *
  * Android / Emscripten / E2E socket / dummy 视频驱动一律不启用。
  */

@@ -1,13 +1,19 @@
 /* Linux 原生菜单栏。X11/Wayland 没有 Win32 SetMenu。
- * GtkSocket/XEmbed 要求子窗口实现 XEMBED,SDL 窗口没有,XFCE 上会嵌入失败、
- * 看起来像「装了 GTK 仍无菜单」。X11 改为 XReparentWindow 把 SDL 窗口挂到
- * GTK 菜单栏下面的 EventBox 里。Wayland 仍用贴顶工具条。
+ *
+ * 不要 GtkSocket/XEmbed:SDL 不实现 XEMBED,Debian/XFCE 上会静默失败。
+ * 不要 XReparentWindow:XFCE 合成器仍把 SDL 当独立顶层窗,拖 GTK 外框时
+ * 游戏画面留在原地(用户看到两个窗口)。
+ *
+ * X11:GTK 是带 GtkMenuBar 的装饰窗口,EventBox 占 240x320 客户区;
+ * SDL 去边框,按 EventBox 根坐标跟随(configure / size-allocate / idle)。
+ * Wayland 没有全局坐标,仍用贴顶工具条。
  * 菜单回调只 queue_cmd,不在 GTK 信号里重启引擎。 */
 #include "./include/desktop_shell_internal.h"
 
 #include <gtk/gtk.h>
 #ifdef GDK_WINDOWING_X11
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
 #include <gdk/gdkx.h>
 #endif
 
@@ -27,7 +33,10 @@ static GtkWidget *g_gtk_win;
 static GtkWidget *g_embed_area;
 static GtkWidget *g_recent_menu;
 static int g_has_menubar;
-static int g_embedded; /* 1 = XReparent 嵌入,0 = 贴顶工具条 */
+static int g_embedded; /* 1 = GTK 主窗 + 无边框 SDL 跟随,0 = 贴顶工具条 */
+static int g_overlay_lock; /* SDL_SetWindowPosition 时忽略 WINDOWEVENT,避免回环 */
+static int g_last_ox = -1, g_last_oy = -1, g_last_ow = -1, g_last_oh = -1;
+static int g_popup_open; /* GtkMenu 展开时不要把 SDL 抬到前面,否则会盖住下拉菜单 */
 static GtkWidget *g_edit_dlg;
 static GtkWidget *g_edit_entry;
 static int g_edit_done;
@@ -38,7 +47,10 @@ static int g_bar_h = 28;
 #ifdef GDK_WINDOWING_X11
 static Display *g_x11_dpy;
 static Window g_sdl_xid;
+static void stack_sdl_against_gtk(void);
 #endif
+static int gtk_chrome_busy(void);
+static void overlay_sdl(void);
 
 static void copy_str(char *dst, size_t n, const char *src) {
     if (!dst || n == 0) return;
@@ -101,26 +113,207 @@ static gboolean on_gtk_delete(GtkWidget *w, GdkEvent *e, gpointer data) {
     return TRUE;
 }
 
+static void on_popup_map(GtkWidget *w, gpointer data) {
+    (void)w;
+    (void)data;
+    g_popup_open++;
+}
+
+static void on_popup_unmap(GtkWidget *w, gpointer data) {
+    (void)w;
+    (void)data;
+    if (g_popup_open > 0) g_popup_open--;
 #ifdef GDK_WINDOWING_X11
+    /* 菜单关掉后再把 SDL 盖回 EventBox。 */
+    if (g_popup_open == 0 && g_embedded && !gtk_chrome_busy()) {
+        stack_sdl_against_gtk();
+    }
+#endif
+}
+
+static void hook_menus(GtkWidget *widget) {
+    if (GTK_IS_MENU(widget)) {
+        g_signal_connect(widget, "map", G_CALLBACK(on_popup_map), NULL);
+        g_signal_connect(widget, "unmap", G_CALLBACK(on_popup_unmap), NULL);
+    }
+    /* 子菜单不在 GtkMenuItem 的 container children 里,要单独取。 */
+    if (GTK_IS_MENU_ITEM(widget)) {
+        GtkWidget *sub = gtk_menu_item_get_submenu(GTK_MENU_ITEM(widget));
+        if (sub) hook_menus(sub);
+    }
+    if (GTK_IS_CONTAINER(widget)) {
+        GList *ch = gtk_container_get_children(GTK_CONTAINER(widget));
+        GList *it;
+        for (it = ch; it; it = it->next) {
+            hook_menus(GTK_WIDGET(it->data));
+        }
+        g_list_free(ch);
+    }
+}
+
+/* 文件选择/设置对话框打开时不能把不透明路径的 SDL 抬到最前,否则会盖住对话框。 */
+static int gtk_chrome_busy(void) {
+    GList *tops, *it;
+    int busy = 0;
+    if (g_popup_open > 0) return 1;
+    if (g_edit_dlg) return 1;
+    tops = gtk_window_list_toplevels();
+    for (it = tops; it; it = it->next) {
+        GtkWidget *w = GTK_WIDGET(it->data);
+        if (w == g_gtk_win) continue;
+        if (!gtk_widget_get_visible(w)) continue;
+        busy = 1;
+        break;
+    }
+    g_list_free(tops);
+    return busy;
+}
+
+#ifdef GDK_WINDOWING_X11
+/* SDL 盖住 EventBox,但紧贴 GTK 之上,这样标题栏/菜单栏仍露在外面。 */
+static void stack_sdl_against_gtk(void) {
+    GdkWindow *gw;
+    Window gtk_xid;
+    XWindowChanges ch;
+    if (!g_x11_dpy || !g_sdl_xid || !g_gtk_win) return;
+    gw = gtk_widget_get_window(g_gtk_win);
+    if (!gw) return;
+    gtk_xid = gdk_x11_window_get_xid(gw);
+    ch.sibling = gtk_xid;
+    ch.stack_mode = Above;
+    XConfigureWindow(g_x11_dpy, g_sdl_xid, CWSibling | CWStackMode, &ch);
+}
+#endif
+
+/* 把无边框 SDL 对齐到 GTK EventBox 的屏幕坐标。拖 GTK 外框时靠这个跟着走。 */
+static void overlay_sdl(void) {
+    int ox = 0, oy = 0, ww, hh;
+    int moved = 0;
+    GdkWindow *gdkwin;
+    if (!g_sdl || !g_embed_area || !g_embedded || g_overlay_lock) return;
+    gdkwin = gtk_widget_get_window(g_embed_area);
+    if (!gdkwin) return;
+    gdk_window_get_origin(gdkwin, &ox, &oy);
+    ww = gtk_widget_get_allocated_width(g_embed_area);
+    hh = gtk_widget_get_allocated_height(g_embed_area);
+    if (ww <= 0 || hh <= 0) return;
+    if (ox != g_last_ox || oy != g_last_oy || ww != g_last_ow || hh != g_last_oh) {
+        moved = 1;
+        g_overlay_lock = 1;
+        SDL_SetWindowPosition(g_sdl, ox, oy);
+        if (ww != g_last_ow || hh != g_last_oh) {
+            SDL_SetWindowSize(g_sdl, ww, hh);
+        }
+        g_last_ox = ox;
+        g_last_oy = oy;
+        g_last_ow = ww;
+        g_last_oh = hh;
+        g_overlay_lock = 0;
+    }
+#ifdef GDK_WINDOWING_X11
+    /* 点标题栏后 WM 会把 GTK 抬到 SDL 前,EventBox 会挡住游戏;无菜单/对话框时再盖回去。 */
+    if (!gtk_chrome_busy()) {
+        stack_sdl_against_gtk();
+    }
+#else
+    (void)moved;
+    if (moved && !gtk_chrome_busy()) {
+        SDL_RaiseWindow(g_sdl);
+    }
+#endif
+}
+
+#ifdef GDK_WINDOWING_X11
+/* SDL 默认 _NET_WM_BYPASS_COMPOSITOR=1,和 GTK 不在同一合成层,拖动会看起来脱节。
+ * skip-taskbar + transient-for 让任务栏只留 GTK 这一条,Alt+Tab 也不出两个 SkyEngine。 */
+static void apply_sdl_x11_hints(void) {
+    GdkWindow *gw;
+    Window gtk_xid;
+    Atom state, skip_taskbar, skip_pager, bypass;
+    XEvent ev;
+    unsigned long bypass_val = 0;
+    if (!g_x11_dpy || !g_sdl_xid || !g_gtk_win) return;
+    gw = gtk_widget_get_window(g_gtk_win);
+    if (!gw) return;
+    gtk_xid = gdk_x11_window_get_xid(gw);
+    XSetTransientForHint(g_x11_dpy, g_sdl_xid, gtk_xid);
+
+    skip_taskbar = XInternAtom(g_x11_dpy, "_NET_WM_STATE_SKIP_TASKBAR", False);
+    skip_pager = XInternAtom(g_x11_dpy, "_NET_WM_STATE_SKIP_PAGER", False);
+    state = XInternAtom(g_x11_dpy, "_NET_WM_STATE", False);
+    bypass = XInternAtom(g_x11_dpy, "_NET_WM_BYPASS_COMPOSITOR", False);
+
+    memset(&ev, 0, sizeof(ev));
+    ev.xclient.type = ClientMessage;
+    ev.xclient.window = g_sdl_xid;
+    ev.xclient.message_type = state;
+    ev.xclient.format = 32;
+    ev.xclient.data.l[0] = 1; /* _NET_WM_STATE_ADD */
+    ev.xclient.data.l[1] = (long)skip_taskbar;
+    ev.xclient.data.l[2] = (long)skip_pager;
+    ev.xclient.data.l[3] = 1;
+    XSendEvent(g_x11_dpy, DefaultRootWindow(g_x11_dpy), False,
+               SubstructureNotifyMask | SubstructureRedirectMask, &ev);
+    XChangeProperty(g_x11_dpy, g_sdl_xid, bypass, XA_CARDINAL, 32,
+                    PropModeReplace, (unsigned char *)&bypass_val, 1);
+    XSync(g_x11_dpy, False);
+}
+
+static gboolean on_gtk_configure(GtkWidget *w, GdkEventConfigure *e, gpointer data) {
+    (void)w;
+    (void)e;
+    (void)data;
+    overlay_sdl();
+    return FALSE;
+}
+
+static void on_area_allocate(GtkWidget *w, GtkAllocation *alloc, gpointer data) {
+    (void)w;
+    (void)alloc;
+    (void)data;
+    overlay_sdl();
+}
+
+static gboolean on_gtk_map(GtkWidget *w, GdkEventAny *e, gpointer data) {
+    (void)w;
+    (void)e;
+    (void)data;
+    if (g_sdl) SDL_ShowWindow(g_sdl);
+    apply_sdl_x11_hints();
+    g_last_ox = -1;
+    overlay_sdl();
+    return FALSE;
+}
+
+static gboolean on_gtk_unmap(GtkWidget *w, GdkEventAny *e, gpointer data) {
+    (void)w;
+    (void)e;
+    (void)data;
+    /* GTK 最小化/切工作区时把无边框 SDL 一起藏起来,否则画面会留在原地。 */
+    if (!g_embedded || !g_sdl) return FALSE;
+    SDL_HideWindow(g_sdl);
+    g_last_ox = -1;
+    return FALSE;
+}
+
 static int try_x11_embed(GtkWidget *bar, int w, int h) {
     SDL_SysWMinfo info;
     GtkWidget *vbox;
     GtkWidget *area;
-    GdkWindow *gdkwin;
-    Window parent_xid;
+    int sx = 0, sy = 0;
 
     SDL_VERSION(&info.version);
     if (!SDL_GetWindowWMInfo(g_sdl, &info) || info.subsystem != SDL_SYSWM_X11) {
-        fprintf(stderr, "[desktop_shell] GTK: SDL 不是 X11 窗口,无法嵌入\n");
+        fprintf(stderr, "[desktop_shell] GTK: SDL 不是 X11 窗口,无法叠放菜单窗\n");
         return -1;
     }
 
-    /* EventBox 有自己的 X window,才能当 XReparent 的父窗口。
-     * GtkSocket 要 XEMBED,SDL 不实现该协议,Debian/XFCE 上会嵌入失败。 */
     g_gtk_win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(g_gtk_win), "SkyEngine");
+    gtk_window_set_resizable(GTK_WINDOW(g_gtk_win), FALSE);
     vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     area = gtk_event_box_new();
+    gtk_event_box_set_visible_window(GTK_EVENT_BOX(area), TRUE);
     gtk_widget_set_size_request(area, w, h);
     gtk_widget_set_hexpand(area, TRUE);
     gtk_widget_set_vexpand(area, TRUE);
@@ -128,29 +321,43 @@ static int try_x11_embed(GtkWidget *bar, int w, int h) {
     gtk_box_pack_start(GTK_BOX(vbox), area, TRUE, TRUE, 0);
     gtk_container_add(GTK_CONTAINER(g_gtk_win), vbox);
     g_signal_connect(g_gtk_win, "delete-event", G_CALLBACK(on_gtk_delete), NULL);
+    g_signal_connect(g_gtk_win, "configure-event", G_CALLBACK(on_gtk_configure), NULL);
+    g_signal_connect(g_gtk_win, "map-event", G_CALLBACK(on_gtk_map), NULL);
+    g_signal_connect(g_gtk_win, "unmap-event", G_CALLBACK(on_gtk_unmap), NULL);
+    g_signal_connect(area, "size-allocate", G_CALLBACK(on_area_allocate), NULL);
+
+    SDL_GetWindowPosition(g_sdl, &sx, &sy);
+    gtk_window_move(GTK_WINDOW(g_gtk_win), sx, sy);
+
     gtk_widget_show_all(g_gtk_win);
     while (gtk_events_pending()) {
         gtk_main_iteration_do(FALSE);
     }
-    gdkwin = gtk_widget_get_window(area);
-    if (!gdkwin) {
-        fprintf(stderr, "[desktop_shell] GTK: EventBox 尚未 realize,放弃嵌入\n");
+    if (!gtk_widget_get_window(area) || !gtk_widget_get_window(g_gtk_win)) {
+        fprintf(stderr, "[desktop_shell] GTK: EventBox 尚未 realize,放弃叠放\n");
         gtk_widget_destroy(g_gtk_win);
         g_gtk_win = NULL;
         return -1;
     }
-    parent_xid = gdk_x11_window_get_xid(gdkwin);
+    {
+        int bh = gtk_widget_get_allocated_height(bar);
+        if (bh > 0) g_bar_h = bh;
+    }
     g_x11_dpy = info.info.x11.display;
     g_sdl_xid = info.info.x11.window;
-    SDL_SetWindowBordered(g_sdl, SDL_FALSE);
-    XReparentWindow(g_x11_dpy, g_sdl_xid, parent_xid, 0, 0);
-    XResizeWindow(g_x11_dpy, g_sdl_xid, (unsigned)w, (unsigned)h);
-    XMapWindow(g_x11_dpy, g_sdl_xid);
-    XSync(g_x11_dpy, False);
     g_embed_area = area;
     g_embedded = 1;
     g_has_menubar = 1;
-    fprintf(stderr, "[desktop_shell] GTK menubar: X11 reparent %dx%d\n", w, h);
+    g_last_ox = -1;
+    hook_menus(g_gtk_win);
+    /* 窗口已创建后再改 hint,SDL 自己不会重发;apply_sdl_x11_hints 直接写 X 属性。 */
+#ifdef SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR
+    SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
+#endif
+    SDL_SetWindowBordered(g_sdl, SDL_FALSE);
+    apply_sdl_x11_hints();
+    overlay_sdl();
+    fprintf(stderr, "[desktop_shell] GTK menubar: X11 overlay %dx%d\n", w, h);
     return 0;
 }
 #endif
@@ -216,6 +423,8 @@ int desktop_shell_gtk_init(struct SDL_Window *window, int w, int h) {
 
 void desktop_shell_gtk_shutdown(void) {
     desktop_shell_gtk_edit_close();
+    /* 先清 g_embedded,避免 destroy 触发 unmap 把还活着的 SDL 藏起来。 */
+    g_embedded = 0;
     if (g_gtk_win) {
         gtk_widget_destroy(g_gtk_win);
         g_gtk_win = NULL;
@@ -227,6 +436,9 @@ void desktop_shell_gtk_shutdown(void) {
 #endif
     g_recent_menu = NULL;
     g_has_menubar = 0;
+    g_overlay_lock = 0;
+    g_popup_open = 0;
+    g_last_ox = g_last_oy = g_last_ow = g_last_oh = -1;
     g_sdl = NULL;
 }
 
@@ -234,6 +446,8 @@ void desktop_shell_gtk_idle(void) {
     while (gtk_events_pending()) {
         gtk_main_iteration_do(FALSE);
     }
+    /* 拖动时 configure 可能被合成器合并,16ms idle 再对齐一次。 */
+    if (g_embedded) overlay_sdl();
 }
 
 int desktop_shell_gtk_needs_idle(void) {
@@ -277,17 +491,19 @@ void desktop_shell_gtk_refresh_recents(void) {
 
 void desktop_shell_gtk_sync_window(void) {
     int w = 0, h = 0;
-    if (!g_sdl) return;
+    if (!g_sdl || g_overlay_lock) return;
     SDL_GetWindowSize(g_sdl, &w, &h);
     if (g_embedded && g_embed_area) {
-        gtk_widget_set_size_request(g_embed_area, w, h);
-        if (g_gtk_win) gtk_window_resize(GTK_WINDOW(g_gtk_win), w, h + g_bar_h);
-#ifdef GDK_WINDOWING_X11
-        if (g_x11_dpy && g_sdl_xid) {
-            XResizeWindow(g_x11_dpy, g_sdl_xid, (unsigned)w, (unsigned)h);
-            XSync(g_x11_dpy, False);
+        int aw = gtk_widget_get_allocated_width(g_embed_area);
+        int ah = gtk_widget_get_allocated_height(g_embed_area);
+        /* 设置菜单改分辨率时 SDL 先变,EventBox 跟上;allocate 完成前不要 overlay 把尺寸写回去。 */
+        if (w > 0 && h > 0 && (w != aw || h != ah)) {
+            gtk_widget_set_size_request(g_embed_area, w, h);
+            if (g_gtk_win) gtk_window_resize(GTK_WINDOW(g_gtk_win), w, h + g_bar_h);
+            g_last_ow = -1;
+            return;
         }
-#endif
+        overlay_sdl();
     } else {
         dock_bar();
     }
@@ -295,8 +511,13 @@ void desktop_shell_gtk_sync_window(void) {
 
 int desktop_shell_gtk_handle_window_event(const union SDL_Event *ev) {
     if (!ev || ev->type != SDL_WINDOWEVENT) return 0;
+    if (g_overlay_lock) return 0;
     switch (ev->window.event) {
         case SDL_WINDOWEVENT_MOVED:
+            /* 叠放模式下位置以 GTK 为准,SDL 被 WM 拖走就拉回去。 */
+            if (g_embedded) overlay_sdl();
+            else desktop_shell_gtk_sync_window();
+            break;
         case SDL_WINDOWEVENT_RESIZED:
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         case SDL_WINDOWEVENT_SHOWN:
