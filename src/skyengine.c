@@ -337,7 +337,14 @@ int startEngine(const SkyEngineArgs *args) {
     return MR_SUCCESS;
 }
 
+extern int32 mr_stop(void);
+
 void stopEngine(void) {
+    /* 同进程重启(桌面「重启模拟器」/换 MRP)必须先走 mr_stop:它会卸载
+     * native_ext 并 uc_close Unicorn。若只 destroy 宿主菜单/堆,下一轮
+     * startEngine 会带着残留 EXT 模块跑,表现为花屏或崩溃。
+     * 进程退出也走这里;mr_state==IDLE 时 mr_stop_ex 返回 MR_IGNORE。 */
+    mr_stop();
     skyengine_runtime_destroy(&runtime);
     skyengine_set_exit_requested(0);
 }

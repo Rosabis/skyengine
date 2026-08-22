@@ -265,7 +265,7 @@ void skyengine_args_print_usage(const char *program) {
     printf("  %s /path/to/app.mrp start.mr _dsm\n", name);
 }
 
-static int resolve_cli_mrp_path(const char *input, char *output, size_t output_size) {
+int skyengine_args_resolve_mrp_path(const char *input, char *output, size_t output_size) {
     if (!input || !*input) {
         fprintf(stderr, "skyengine: empty MRP path\n");
         return MR_FAILED;
@@ -301,8 +301,9 @@ static int resolve_cli_mrp_path(const char *input, char *output, size_t output_s
     return MR_SUCCESS;
 }
 
-static int parse_screen_size(const char *str, int *w, int *h) {
+int skyengine_args_parse_screen(const char *str, int *w, int *h) {
     int tw = 0, th = 0;
+    if (!str || !w || !h) return MR_FAILED;
     if (sscanf(str, "%dx%d", &tw, &th) != 2 || tw <= 0 || th <= 0) {
         return MR_FAILED;
     }
@@ -313,10 +314,12 @@ static int parse_screen_size(const char *str, int *w, int *h) {
 
 /* 解析应用可见内存档位:数字 + 可选 M/MB 后缀(大小写均可),
  * 仅允许真机常见档位 1/2/4/6/8/16 MB。 */
-static int parse_memory_size(const char *str, int *mb) {
+int skyengine_args_parse_memory(const char *str, int *mb) {
     char suffix[3] = {0};
     int value = 0;
-    int n = sscanf(str, "%d%2s", &value, suffix);
+    int n;
+    if (!str || !mb) return MR_FAILED;
+    n = sscanf(str, "%d%2s", &value, suffix);
     if (n < 1) return MR_FAILED;
     if (n == 2 &&
         strcmp(suffix, "M") != 0 && strcmp(suffix, "m") != 0 &&
@@ -366,6 +369,20 @@ int skyengine_args_parse_device_date(const char *str, int *year, int *month, int
     *month = m;
     *day = d;
     return MR_SUCCESS;
+}
+
+void skyengine_args_format_device_date(const SkyEngineArgs *args, char *out, size_t out_sz) {
+    if (!args || !out || out_sz == 0) return;
+    if (args->device_year <= 0) {
+        snprintf(out, out_sz, "host");
+        return;
+    }
+    snprintf(out, out_sz, "%04d-%02d-%02d", args->device_year, args->device_month,
+             args->device_day);
+}
+
+int skyengine_args_resolve_dir(const char *input, char *output, size_t output_size) {
+    return resolve_config_dir(input, output, output_size);
 }
 
 static int parse_positional_args(int argc, char *argv[], const char **mrp_arg,
@@ -488,6 +505,7 @@ int skyengine_args_parse(int argc, char *argv[], SkyEngineArgs *out) {
             fprintf(stderr, "skyengine: invalid work dir '%s'\n", work_dir_arg);
             return MR_FAILED;
         }
+        out->sourced |= SKYENGINE_SRC_WORKDIR;
     } else {
         const char *env_work_dir = getenv("SKYENGINE_WORK_DIR");
         if (env_work_dir && *env_work_dir) {
@@ -496,19 +514,24 @@ int skyengine_args_parse(int argc, char *argv[], SkyEngineArgs *out) {
                 fprintf(stderr, "skyengine: invalid SKYENGINE_WORK_DIR '%s'\n", env_work_dir);
                 return MR_FAILED;
             }
+            out->sourced |= SKYENGINE_SRC_WORKDIR;
         }
     }
 
-    /* MRP path: CLI arg > env var > default */
+    /* MRP path: CLI arg > env var > default.
+     * README 仍记录上游 VMRP_MRP/VMRP_EXT/VMRP_ENTRY,与 SKYENGINE_* 并列读取。 */
     if (mrp_arg) {
-        if (resolve_cli_mrp_path(mrp_arg, out->mrp_path,
+        if (skyengine_args_resolve_mrp_path(mrp_arg, out->mrp_path,
                                  sizeof(out->mrp_path)) != MR_SUCCESS) {
             return MR_FAILED;
         }
+        out->sourced |= SKYENGINE_SRC_MRP;
     } else {
         const char *env_mrp = getenv("SKYENGINE_MRP");
+        if (!env_mrp || !*env_mrp) env_mrp = getenv("VMRP_MRP");
         if (env_mrp && *env_mrp) {
             snprintf(out->mrp_path, sizeof(out->mrp_path), "%s", env_mrp);
+            out->sourced |= SKYENGINE_SRC_MRP;
         } else {
             snprintf(out->mrp_path, sizeof(out->mrp_path), "dsm_gm.mrp");
         }
@@ -517,37 +540,50 @@ int skyengine_args_parse(int argc, char *argv[], SkyEngineArgs *out) {
     /* Extension name: CLI arg > env var > default */
     if (ext_arg) {
         snprintf(out->ext_name, sizeof(out->ext_name), "%s", ext_arg);
+        out->sourced |= SKYENGINE_SRC_EXT;
     } else {
         const char *env_ext = getenv("SKYENGINE_EXT");
+        if (!env_ext || !*env_ext) env_ext = getenv("VMRP_EXT");
         if (env_ext && *env_ext) {
             snprintf(out->ext_name, sizeof(out->ext_name), "%s", env_ext);
+            out->sourced |= SKYENGINE_SRC_EXT;
         }
     }
 
     /* Entry point: CLI arg > env var > none */
     if (entry_arg) {
         snprintf(out->entry, sizeof(out->entry), "%s", entry_arg);
+        out->sourced |= SKYENGINE_SRC_ENTRY;
     } else {
         const char *env_entry = getenv("SKYENGINE_ENTRY");
+        if (!env_entry || !*env_entry) env_entry = getenv("VMRP_ENTRY");
         if (env_entry && *env_entry) {
             snprintf(out->entry, sizeof(out->entry), "%s", env_entry);
+            out->sourced |= SKYENGINE_SRC_ENTRY;
         }
     }
 
     /* Screen size: CLI --screen > env vars > default */
     if (screen_arg) {
         int w, h;
-        if (parse_screen_size(screen_arg, &w, &h) != MR_SUCCESS) {
+        if (skyengine_args_parse_screen(screen_arg, &w, &h) != MR_SUCCESS) {
             fprintf(stderr, "skyengine: invalid screen size '%s' (expected WxH, e.g. 176x220)\n", screen_arg);
             return MR_FAILED;
         }
         out->screen_width = w;
         out->screen_height = h;
+        out->sourced |= SKYENGINE_SRC_SCREEN;
     } else {
         const char *env_w = getenv("SKYENGINE_SCREEN_WIDTH");
         const char *env_h = getenv("SKYENGINE_SCREEN_HEIGHT");
-        if (env_w && *env_w) out->screen_width = atoi(env_w);
-        if (env_h && *env_h) out->screen_height = atoi(env_h);
+        if (env_w && *env_w) {
+            out->screen_width = atoi(env_w);
+            out->sourced |= SKYENGINE_SRC_SCREEN;
+        }
+        if (env_h && *env_h) {
+            out->screen_height = atoi(env_h);
+            out->sourced |= SKYENGINE_SRC_SCREEN;
+        }
     }
 
     /* Memory size: CLI --memory > env var > default */
@@ -557,11 +593,12 @@ int skyengine_args_parse(int argc, char *argv[], SkyEngineArgs *out) {
     }
     if (memory_arg) {
         int mb;
-        if (parse_memory_size(memory_arg, &mb) != MR_SUCCESS) {
+        if (skyengine_args_parse_memory(memory_arg, &mb) != MR_SUCCESS) {
             fprintf(stderr, "skyengine: invalid memory size '%s' (allowed: 1M,2M,4M,6M,8M,16M)\n", memory_arg);
             return MR_FAILED;
         }
         out->memory_mb = mb;
+        out->sourced |= SKYENGINE_SRC_MEMORY;
     }
 
     /* Device date: CLI --device-date > env var > deterministic legacy RTC. */
@@ -569,23 +606,27 @@ int skyengine_args_parse(int argc, char *argv[], SkyEngineArgs *out) {
         const char *env_device_date = getenv("SKYENGINE_DEVICE_DATE");
         if (env_device_date && *env_device_date) device_date_arg = env_device_date;
     }
-    if (device_date_arg &&
-        skyengine_args_parse_device_date(device_date_arg, &out->device_year,
+    if (device_date_arg) {
+        if (skyengine_args_parse_device_date(device_date_arg, &out->device_year,
                                     &out->device_month,
                                     &out->device_day) != MR_SUCCESS) {
-        fprintf(stderr,
-                "skyengine: invalid device date '%s' (expected YYYY-MM-DD or host)\n",
-                device_date_arg);
-        return MR_FAILED;
+            fprintf(stderr,
+                    "skyengine: invalid device date '%s' (expected YYYY-MM-DD or host)\n",
+                    device_date_arg);
+            return MR_FAILED;
+        }
+        out->sourced |= SKYENGINE_SRC_DATE;
     }
 
     /* DNS map: CLI --dns-map > env var > default */
     if (dns_map_arg) {
         snprintf(out->dns_map, sizeof(out->dns_map), "%s", dns_map_arg);
+        out->sourced |= SKYENGINE_SRC_DNS;
     } else {
         const char *env_dns_map = getenv("SKYENGINE_DNS_MAP");
         if (env_dns_map) {
             snprintf(out->dns_map, sizeof(out->dns_map), "%s", env_dns_map);
+            out->sourced |= SKYENGINE_SRC_DNS;
         }
     }
 
@@ -598,6 +639,7 @@ int skyengine_args_parse(int argc, char *argv[], SkyEngineArgs *out) {
         }
         if (sf2 && *sf2) {
             snprintf(out->sf2_path, sizeof(out->sf2_path), "%s", sf2);
+            out->sourced |= SKYENGINE_SRC_SF2;
         }
     }
 

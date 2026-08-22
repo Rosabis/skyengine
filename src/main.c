@@ -21,6 +21,9 @@
 #include "./include/skyengine.h"
 #include "./include/memory.h"
 #include "./include/log.h"
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+#include "./include/desktop_shell.h"
+#endif
 
 #ifdef _MSC_VER
 #include <SDL.h>
@@ -56,6 +59,9 @@
 static SDL_TimerID timeId = 0;
 static SDL_Window *window;
 static bool isMouseDown = false;
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+static SkyEngineArgs g_desktop_args;
+#endif
 
 /* PPM 截屏：收到 SIGUSR1 时将当前 SDL surface 转储为 PPM 文件，
  * 用于在无显示器环境下验证画面是否正常渲染。 */
@@ -1025,6 +1031,41 @@ int32_t timerStop(void) {
     return MR_SUCCESS;
 }
 
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+static void desktop_shell_stop_timer(void) {
+    timerStop();
+}
+
+/* 文件/设置菜单换 MRP 或改分辨率/内存时同进程重启。必须先 timerStop+mr_stop
+ * (stopEngine 内),再按当前 g_desktop_args 重建窗口客户区并 startEngine。 */
+static int desktop_shell_restart_engine(void) {
+    memset(&keyLatch, 0, sizeof(keyLatch));
+    isMouseDown = false;
+    timerStop();
+    stopEngine();
+    SDL_AtomicSet(&timerArmGeneration, 0);
+    SDL_AtomicSet(&timerDispatchedGeneration, 0);
+    SDL_AtomicSet(&timerPendingGeneration, 0);
+    SDL_AtomicSet(&timerDispatchInProgress, 0);
+    SDL_AtomicSet(&runtimeExited, 0);
+    skyengine_config.screen_width = g_desktop_args.screen_width;
+    skyengine_config.screen_height = g_desktop_args.screen_height;
+    skyengine_config.memory_mb = g_desktop_args.memory_mb;
+    if (g_desktop_args.sf2_path[0]) {
+        snprintf(skyengine_config.sf2_path, sizeof(skyengine_config.sf2_path),
+                 "%s", g_desktop_args.sf2_path);
+    }
+    if (window) {
+        SDL_SetWindowSize(window, g_desktop_args.screen_width,
+                          g_desktop_args.screen_height);
+    }
+    if (startEngine(&g_desktop_args) != MR_SUCCESS) {
+        return -1;
+    }
+    return 0;
+}
+#endif
+
 static SDL_Keycode keyboard_event_keycode(const SDL_KeyboardEvent *key) {
 #ifdef _WIN32
     return (SDL_Keycode)skyengine_normalize_windows_keycode(
@@ -1246,6 +1287,12 @@ void loop(void) {
                 // emscripten_cancel_main_loop();
                 break;
             }
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+            if (desktop_shell_handle_event(&ev)) {
+                desktop_shell_pump();
+                continue;
+            }
+#endif
             if (ev.type == e2eEventType) {
                 e2e_control_execute(e2eControl, &ev);
                 continue;
@@ -1502,6 +1549,9 @@ int main(int argc, char *args[]) {
     if (skyengine_args_parse(argc, args, &skyengine_args) != MR_SUCCESS) {
         return -1;
     }
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    g_desktop_args = skyengine_args;
+#endif
 
 #if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
     /* 桌面版运行日志:生成 log.txt 并把 stderr 诊断一并落盘。
@@ -1603,23 +1653,57 @@ int main(int argc, char *args[]) {
     e2e_hooks.motion_input = e2e_motion_input_hook;
     e2eControl = e2e_control_create(e2eEventType, &e2e_hooks);
 
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    {
+        /* 交互桌面才挂文件/设置菜单。E2E/dummy 驱动在 desktop_shell_enabled()
+         * 里直接跳过,避免改窗口客户区或读取 GUI 配置污染回归分辨率。 */
+        DesktopShellHost shell_host;
+        memset(&shell_host, 0, sizeof(shell_host));
+        g_desktop_args = skyengine_args;
+        shell_host.window = window;
+        shell_host.args = &g_desktop_args;
+        shell_host.stop_timer = desktop_shell_stop_timer;
+        shell_host.restart_engine = desktop_shell_restart_engine;
+        desktop_shell_init(&shell_host);
+        skyengine_args = g_desktop_args;
+        skyengine_config.screen_width = skyengine_args.screen_width;
+        skyengine_config.screen_height = skyengine_args.screen_height;
+        SDL_SetWindowSize(window, skyengine_args.screen_width,
+                          skyengine_args.screen_height);
+    }
+#endif
+
     #if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
     skyengine_log_msg("[main] startEngine() begin\n");
 #endif
     if (startEngine(&skyengine_args) != MR_SUCCESS) {
 #if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
         skyengine_log_msg("[main] startEngine FAILED (see log.txt for engine diagnostics)\n");
-#endif
+        /* 交互桌面保留窗口和文件菜单,让用户改选 MRP;e2e/无菜单路径仍视为启动失败。 */
+        if (!desktop_shell_enabled()) {
+            desktop_shell_shutdown();
+            e2e_control_destroy(e2eControl);
+            e2eControl = NULL;
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return -1;
+        }
+#else
         e2e_control_destroy(e2eControl);
         e2eControl = NULL;
         SDL_DestroyWindow(window);
         SDL_Quit();
         return -1;
-    }
-#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
-    skyengine_log_msg("[main] startEngine OK\n");
 #endif
+    } else {
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+        skyengine_log_msg("[main] startEngine OK\n");
+#endif
+    }
     if (skyengine_is_exited()) {
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+        desktop_shell_shutdown();
+#endif
         stopEngine();
         e2e_control_destroy(e2eControl);
         e2eControl = NULL;
@@ -1635,6 +1719,9 @@ int main(int argc, char *args[]) {
 #endif
     e2e_control_destroy(e2eControl);
     e2eControl = NULL;
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    desktop_shell_shutdown();
+#endif
     stopEngine();
     SDL_DestroyWindow(window);
     SDL_Quit();

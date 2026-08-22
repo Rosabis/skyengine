@@ -2,6 +2,7 @@
 #define __VMRP_ARGS_H__
 
 #include <limits.h>
+#include <stddef.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -18,6 +19,18 @@
 #define VMRP_MRP_NAME_LIMIT 128
 #define SKYENGINE_DNS_MAP_LIMIT 2048
 
+/* CLI 或环境变量已经写过对应字段。桌面 UI 配置文件不得覆盖这些来源,
+ * 否则 e2e/`--screen` 会被上次 GUI 保存的分辨率悄悄改掉。 */
+#define SKYENGINE_SRC_SCREEN   (1u << 0)
+#define SKYENGINE_SRC_MEMORY   (1u << 1)
+#define SKYENGINE_SRC_DATE     (1u << 2)
+#define SKYENGINE_SRC_WORKDIR  (1u << 3)
+#define SKYENGINE_SRC_DNS      (1u << 4)
+#define SKYENGINE_SRC_MRP      (1u << 5)
+#define SKYENGINE_SRC_EXT      (1u << 6)
+#define SKYENGINE_SRC_ENTRY    (1u << 7)
+#define SKYENGINE_SRC_SF2      (1u << 8)
+
 typedef struct SkyEngineArgs {
     int screen_width;
     int screen_height;
@@ -33,11 +46,17 @@ typedef struct SkyEngineArgs {
     /* 非空时使用 TinySoundFont 渲染 MIDI(SF2 音色库路径)；
      * 为空则回退到内置波形合成。仅桌面端经 --sf2/环境变量注入。 */
     char sf2_path[PATH_MAX];
+    unsigned sourced;
 } SkyEngineArgs;
 
 SkyEngineArgs skyengine_args_default(void);
 /* Shared calendar validation for CLI and embedding API configuration. */
 int skyengine_args_parse_device_date(const char *str, int *year, int *month, int *day);
+int skyengine_args_parse_screen(const char *str, int *w, int *h);
+int skyengine_args_parse_memory(const char *str, int *mb);
+void skyengine_args_format_device_date(const SkyEngineArgs *args, char *out, size_t out_sz);
+int skyengine_args_resolve_mrp_path(const char *input, char *output, size_t output_size);
+int skyengine_args_resolve_dir(const char *input, char *output, size_t output_size);
 int skyengine_args_parse(int argc, char *argv[], SkyEngineArgs *out);
 void skyengine_args_print_usage(const char *program);
 

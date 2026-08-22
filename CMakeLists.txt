@@ -313,6 +313,7 @@ set(SKYENGINE_ARM_EXT_SOURCES
 # 严格警告作用面 = skyengine 可执行文件里除 mythroad 子项目外的全部第一方源码
 set(SKYENGINE_FIRST_PARTY_SOURCES
   ${SKYENGINE_PLATFORM_SDL_SOURCES}
+  ./src/desktop_shell.c
   ${SKYENGINE_CORE_SOURCES}
   ./src/native_platform_memory.c
   ./src/native_dsm_funcs.c
@@ -334,6 +335,7 @@ if(NOT SKYENGINE_BUILD_SHARED_ONLY)
 # --- Native 构建 ---
 add_executable(skyengine
   ${SKYENGINE_PLATFORM_SDL_SOURCES}
+  ./src/desktop_shell.c
   ${SKYENGINE_CORE_SOURCES}
   ./src/native_platform_memory.c
   ./src/native_dsm_funcs.c
@@ -379,6 +381,10 @@ else()
   # --no-as-needed 确保 libm 不被 GNU ld 按需跳过——unicorn 的内部静态库
   # （arm-softmmu）在链接顺序上排在 -lm 之后，需要其中的 sqrtf 等符号
   target_link_libraries(skyengine unicorn "-Wl,--no-as-needed" SDL2main SDL2 m pthread z)
+endif()
+if(WIN32)
+  # 桌面「文件/设置」菜单:GetOpenFileName/SHBrowseForFolder/COM 文件夹对话框。
+  target_link_libraries(skyengine comdlg32 shell32 ole32 comctl32 uuid)
 endif()
 
 if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
