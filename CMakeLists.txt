@@ -357,6 +357,21 @@ if(MSVC)
   add_custom_command(TARGET skyengine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_SDL2_DLL}" $<TARGET_FILE_DIR:skyengine>
   )
+elseif(APPLE)
+  # macOS 的 ld64 不支持 GNU ld 的 --allow-multiple-definition / --no-as-needed，
+  # 这两个分支 flag 只对 Linux 平台生效。Homebrew SDL2 头/库经 pkg-config 定位。
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(APPLE_SDL2 QUIET sdl2)
+  endif()
+  if(APPLE_SDL2_FOUND)
+    target_include_directories(skyengine PRIVATE ${APPLE_SDL2_INCLUDE_DIRS})
+    target_compile_options(skyengine PRIVATE ${APPLE_SDL2_CFLAGS_OTHER})
+    # -L/opt/homebrew/lib 同时覆盖 zlib 的链接路径
+    target_link_libraries(skyengine unicorn ${APPLE_SDL2_LDFLAGS} m z)
+  else()
+    target_link_libraries(skyengine unicorn SDL2main SDL2 m z)
+  endif()
 else()
   skyengine_add_link_flags(skyengine "-Wl,--allow-multiple-definition")
   # --no-as-needed 确保 libm 不被 GNU ld 按需跳过——unicorn 的内部静态库

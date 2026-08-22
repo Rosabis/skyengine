@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/keypad_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_gravity="bottom"
+    android:background="@color/vmrp_pad"
+    android:orientation="vertical"
+    android:paddingLeft="6dp"
+    android:paddingTop="2dp"
+    android:paddingRight="6dp"
+    android:paddingBottom="6dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/btn_menu"
+            style="@style/VmrpMenuBtn"
+            android:text="⋯" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <TableLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:stretchColumns="0,1,2">
+
+            <TableRow>
+                <TextView android:id="@+id/key_1" style="@style/VmrpKey" android:text="1" />
+                <TextView android:id="@+id/key_2" style="@style/VmrpKey" android:text="2" />
+                <TextView android:id="@+id/key_3" style="@style/VmrpKey" android:text="3" />
+            </TableRow>
+
+            <TableRow>
+                <TextView android:id="@+id/key_4" style="@style/VmrpKey" android:text="4" />
+                <TextView android:id="@+id/key_5" style="@style/VmrpKey" android:text="5" />
+                <TextView android:id="@+id/key_6" style="@style/VmrpKey" android:text="6" />
+            </TableRow>
+
+            <TableRow>
+                <TextView android:id="@+id/key_7" style="@style/VmrpKey" android:text="7" />
+                <TextView android:id="@+id/key_8" style="@style/VmrpKey" android:text="8" />
+                <TextView android:id="@+id/key_9" style="@style/VmrpKey" android:text="9" />
+            </TableRow>
+
+            <TableRow>
+                <TextView android:id="@+id/key_star" style="@style/VmrpKey" android:text="*" />
+                <TextView android:id="@+id/key_0" style="@style/VmrpKey" android:text="0" />
+                <TextView android:id="@+id/key_pound" style="@style/VmrpKey" android:text="#" />
+            </TableRow>
+        </TableLayout>
+
+        <View
+            android:layout_width="6dp"
+            android:layout_height="1dp" />
+
+        <TableLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:stretchColumns="0,1,2">
+
+            <TableRow>
+                <TextView android:id="@+id/key_soft_left" style="@style/VmrpKey" android:text="L" />
+                <TextView style="@style/VmrpKeyGhost" android:text="" />
+                <TextView android:id="@+id/key_soft_right" style="@style/VmrpKey" android:text="R" />
+            </TableRow>
+
+            <TableRow>
+                <TextView android:id="@+id/key_up_left" style="@style/VmrpKey" android:text="↖" />
+                <TextView android:id="@+id/key_up" style="@style/VmrpKey" android:text="↑" />
+                <TextView android:id="@+id/key_up_right" style="@style/VmrpKey" android:text="↗" />
+            </TableRow>
+
+            <TableRow>
+                <TextView android:id="@+id/key_left" style="@style/VmrpKey" android:text="←" />
+                <TextView android:id="@+id/key_ok" style="@style/VmrpKey" android:text="F" />
+                <TextView android:id="@+id/key_right" style="@style/VmrpKey" android:text="→" />
+            </TableRow>
+
+            <TableRow>
+                <TextView android:id="@+id/key_down_left" style="@style/VmrpKey" android:text="↙" />
+                <TextView android:id="@+id/key_down" style="@style/VmrpKey" android:text="↓" />
+                <TextView android:id="@+id/key_down_right" style="@style/VmrpKey" android:text="↘" />
+            </TableRow>
+        </TableLayout>
+    </LinearLayout>
+</LinearLayout>

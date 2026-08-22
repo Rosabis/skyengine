@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="vmrp_bg">#101418</color>
+    <color name="vmrp_pad">#D8E4E6EA</color>
+    <color name="vmrp_key">#F7F8FA</color>
+    <color name="vmrp_key_pressed">#CDD2DA</color>
+    <color name="vmrp_key_text">#2C3E8C</color>
+</resources>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Vmrp" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowBackground">@color/vmrp_bg</item>
+        <item name="android:statusBarColor">@color/vmrp_bg</item>
+        <item name="android:navigationBarColor">@color/vmrp_pad</item>
+    </style>
+
+    <style name="VmrpKey">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">40dp</item>
+        <item name="android:layout_margin">2.5dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textColor">@color/vmrp_key_text</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">normal</item>
+        <item name="android:background">@drawable/key_bg</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <style name="VmrpKeyGhost" parent="VmrpKey">
+        <item name="android:background">@android:color/transparent</item>
+        <item name="android:clickable">false</item>
+        <item name="android:focusable">false</item>
+    </style>
+
+    <style name="VmrpMenuBtn">
+        <item name="android:layout_width">36dp</item>
+        <item name="android:layout_height">22dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textColor">@color/vmrp_key_text</item>
+        <item name="android:textSize">18sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+</resources>

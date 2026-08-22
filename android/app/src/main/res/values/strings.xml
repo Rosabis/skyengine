@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">vmrp</string>
+    <string name="import_mrp">导入 MRP</string>
+    <string name="firmware_full">完整固件</string>
+    <string name="firmware_mini">精简固件</string>
+    <string name="about">关于</string>
+    <string name="edit_title">输入</string>
+    <string name="key_soft_left">左软键</string>
+    <string name="key_soft_right">右软键</string>
+    <string name="key_ok">OK</string>
+    <string name="key_send">接听</string>
+    <string name="key_power">挂机</string>
+    <string name="import_ok">已导入 %1$s</string>
+    <string name="import_fail">导入失败</string>
+    <string name="extract_fail">解压运行文件失败</string>
+    <string name="firmware_restart">已切换为 %1$s，正在重启</string>
+    <string name="menu_title">菜单</string>
+    <string name="device_settings">设备信息</string>
+    <string name="label_imei">IMEI</string>
+    <string name="label_imsi">IMSI</string>
+    <string name="label_manuf">厂商</string>
+    <string name="label_model">型号</string>
+    <string name="label_width">宽度</string>
+    <string name="label_height">高度</string>
+    <string name="device_saved">已保存，正在重启</string>
+    <string name="device_invalid">分辨率无效，请填 50–800</string>
+    <string name="about_text">vmrp Android\n基于 SDL2 + Unicorn 2 的 MRP 模拟器。\n导入的游戏放在应用内部 mythroad 目录。</string>
+</resources>

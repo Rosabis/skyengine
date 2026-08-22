@@ -1,0 +1,206 @@
+plugins {
+    id "com.android.application"
+}
+
+def vmrpRoot = rootDir.parentFile
+def thirdPartyDir = new File(rootDir, "third_party")
+def sdlVersion = "2.30.11"
+def unicornVersion = "2.1.4"
+def sdlUrl = "https://github.com/libsdl-org/SDL/releases/download/release-${sdlVersion}/SDL2-${sdlVersion}.zip"
+def unicornUrl = "https://github.com/unicorn-engine/unicorn/archive/refs/tags/${unicornVersion}.zip"
+
+static def downloadFile(String url, File dest) {
+    dest.parentFile.mkdirs()
+    def tmp = new File(dest.parentFile, dest.name + ".part")
+    new URL(url).openConnection().with { conn ->
+        conn.connectTimeout = 60000
+        conn.readTimeout = 600000
+        conn.inputStream.withStream { ins ->
+            tmp.withOutputStream { os -> os << ins }
+        }
+    }
+    if (dest.exists()) {
+        dest.delete()
+    }
+    if (!tmp.renameTo(dest)) {
+        dest.bytes = tmp.bytes
+        tmp.delete()
+    }
+}
+
+static def unzipTo(File zipFile, File destDir) {
+    destDir.mkdirs()
+    java.util.zip.ZipFile zf = new java.util.zip.ZipFile(zipFile)
+    try {
+        zf.entries().each { entry ->
+            def out = new File(destDir, entry.name)
+            if (entry.isDirectory()) {
+                out.mkdirs()
+            } else {
+                out.parentFile.mkdirs()
+                zf.getInputStream(entry).withStream { ins ->
+                    out.withOutputStream { os -> os << ins }
+                }
+            }
+        }
+    } finally {
+        zf.close()
+    }
+}
+
+static def firstSubdirWith(File root, String marker) {
+    if (new File(root, marker).exists()) {
+        return root
+    }
+    def kids = root.listFiles()
+    if (kids == null) {
+        return null
+    }
+    return kids.find { it.isDirectory() && new File(it, marker).exists() }
+}
+
+tasks.register("fetchNativeDeps") {
+    def sdlMarker = new File(thirdPartyDir, "SDL2/CMakeLists.txt")
+    def unicornMarker = new File(thirdPartyDir, "unicorn/CMakeLists.txt")
+    outputs.files(sdlMarker, unicornMarker)
+    doLast {
+        thirdPartyDir.mkdirs()
+        if (!sdlMarker.exists()) {
+            def zip = new File(thirdPartyDir, "SDL2-${sdlVersion}.zip")
+            def unpack = new File(thirdPartyDir, "_sdl_unpack")
+            println "Downloading SDL2 ${sdlVersion}..."
+            downloadFile(sdlUrl, zip)
+            delete(unpack)
+            unzipTo(zip, unpack)
+            def src = firstSubdirWith(unpack, "CMakeLists.txt")
+            if (src == null) {
+                throw new GradleException("SDL2 zip did not contain CMakeLists.txt")
+            }
+            def dest = new File(thirdPartyDir, "SDL2")
+            delete(dest)
+            ant.move(file: src, tofile: dest)
+            delete(unpack)
+            zip.delete()
+        }
+        def sdlWrapper = new File(thirdPartyDir, "SDL2/android-project/gradle")
+        if (sdlWrapper.exists()) {
+            delete(sdlWrapper)
+        }
+        if (!unicornMarker.exists()) {
+            def zip = new File(thirdPartyDir, "unicorn-${unicornVersion}.zip")
+            def unpack = new File(thirdPartyDir, "_unicorn_unpack")
+            println "Downloading Unicorn ${unicornVersion}..."
+            downloadFile(unicornUrl, zip)
+            delete(unpack)
+            unzipTo(zip, unpack)
+            def src = firstSubdirWith(unpack, "CMakeLists.txt")
+            if (src == null) {
+                throw new GradleException("Unicorn zip did not contain CMakeLists.txt")
+            }
+            def dest = new File(thirdPartyDir, "unicorn")
+            delete(dest)
+            ant.move(file: src, tofile: dest)
+            delete(unpack)
+            zip.delete()
+        }
+    }
+}
+
+tasks.register("copyVmrpAssets", Copy) {
+    def src = new File(vmrpRoot, "wasm/dist/fs")
+    from(src)
+    into(new File(projectDir, "src/main/assets/vmrp"))
+    doFirst {
+        if (!src.exists()) {
+            throw new GradleException("Missing runtime assets: ${src}")
+        }
+    }
+}
+
+tasks.register("copySdlRes", Copy) {
+    dependsOn("fetchNativeDeps")
+    from("${rootDir}/third_party/SDL2/android-project/app/src/main/res/xml")
+    into("${projectDir}/src/main/res/xml")
+}
+
+def sdlJavaOut = new File(buildDir, "sdl-java")
+tasks.register("copySdlJava", Copy) {
+    dependsOn("fetchNativeDeps")
+    from("${rootDir}/third_party/SDL2/android-project/app/src/main/java") {
+        exclude "org/libsdl/app/HIDDevice*.java"
+    }
+    into(sdlJavaOut)
+}
+
+tasks.configureEach { task ->
+    if (task.name.startsWith("preBuild") || task.name.startsWith("configureCMake") ||
+            task.name.startsWith("externalNativeBuild") || task.name.startsWith("compileDebugJava") ||
+            task.name.startsWith("compileReleaseJava")) {
+        task.dependsOn("fetchNativeDeps", "copyVmrpAssets", "copySdlJava")
+    }
+}
+
+android {
+    namespace "io.github.vmrp"
+    compileSdk 34
+    ndkVersion "26.3.11579264"
+
+    defaultConfig {
+        applicationId "io.github.vmrp"
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+        ndk {
+            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+        }
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_shared", "-DANDROID_ARM_NEON=TRUE"
+                abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += [sdlJavaOut]
+            assets.srcDirs += []
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+preBuild.dependsOn fetchNativeDeps, copyVmrpAssets, copySdlRes, copySdlJava

@@ -25,6 +25,8 @@
 #include <SDL.h>
 #elif defined(_WIN32)
 #include <SDL2/SDL.h>
+#elif defined(__ANDROID__)
+#include <SDL.h>
 #else
 #include <SDL2/SDL.h>
 #endif
